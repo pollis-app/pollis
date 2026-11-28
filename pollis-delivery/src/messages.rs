@@ -393,11 +393,19 @@ pub async fn apply_send_message(
     authed: Option<&str>,
     body: &SendMessageBody,
 ) -> anyhow::Result<WriteOutcome> {
-    let sealed = body.sealed != 0;
-    // `member_check_user` is whose membership we verify; `stored_sender` is what
-    // lands in the `sender_id` column.
-    let (member_check_user, stored_sender) = if sealed {
-        match authed {
+    let actor = send_actor(authed, body);
+    let probe = send_probe(conn, body, &actor).await?;
+    apply_send_probed(conn, authed, body, actor, &probe).await
+}
+
+/// `(member_check_user, stored_sender)` of a send: whose membership is
+/// verified, and what lands in the `sender_id` column. `Err` is the refusal
+/// [`resolve_actor`] gives an unsealed send signed by someone else.
+type SendActor = Result<(String, String), WriteOutcome>;
+
+fn send_actor(authed: Option<&str>, body: &SendMessageBody) -> SendActor {
+    if body.sealed != 0 {
+        return Ok(match authed {
             // Verify the authenticated writer's membership; store the blinded
             // sentinel the client sent (never bind it to the auth user).
             Some(u) => (u.to_string(), body.sender_id.clone().unwrap_or_default()),
@@ -406,14 +414,85 @@ pub async fn apply_send_message(
                 let s = body.sender_id.clone().unwrap_or_default();
                 (s.clone(), s)
             }
-        }
-    } else {
-        match resolve_actor(authed, body.sender_id.as_deref()) {
-            Ok(s) => (s.clone(), s),
-            Err(o) => return Ok(o),
-        }
+        });
+    }
+    resolve_actor(authed, body.sender_id.as_deref()).map(|s| (s.clone(), s))
+}
+
+/// Everything a send reads before it decides, in ONE round trip (#2180): the
+/// stored envelope under `body.id` (a replay), what `body.conversation_id`
+/// resolves to (the epoch gate's MLS group), and whether the member-check
+/// user is a member of `body.conversation_id`.
+///
+/// Read together, but evaluated in the order they always were (see
+/// [`send_envelope_once`]); one snapshot instead of three only narrows what
+/// could change between them.
+struct SendProbe {
+    /// `(conversation_id, type, delete_token_hash)` of the envelope stored under `body.id`.
+    stored: Option<(String, String, Option<String>)>,
+    /// [`crate::directory::resolve_conversation`] of `body.conversation_id`.
+    resolved: Option<(String, crate::directory::ConversationKind)>,
+    /// [`is_member`] of the member-check user in `body.conversation_id`.
+    member: bool,
+}
+
+async fn send_probe(
+    conn: &Connection,
+    body: &SendMessageBody,
+    actor: &SendActor,
+) -> anyhow::Result<SendProbe> {
+    let sql = format!(
+        "SELECT (SELECT conversation_id FROM message_envelope WHERE id = :envelope_id), \
+                (SELECT type FROM message_envelope WHERE id = :envelope_id), \
+                (SELECT delete_token_hash FROM message_envelope WHERE id = :envelope_id), \
+                {}, {}",
+        crate::directory::RESOLVE_COLUMNS,
+        crate::writes::member_predicate(":member_conversation", ":member_user"),
+    );
+    // A refused actor checks nobody's membership; the refusal decides first.
+    let member_user = match actor {
+        Ok((user, _)) => libsql::Value::from(user.clone()),
+        Err(_) => libsql::Value::Null,
     };
-    if authed.is_some() && !is_member(conn, &body.conversation_id, &member_check_user).await? {
+    let mut rows = conn
+        .query(
+            &sql,
+            libsql::named_params! {
+                ":envelope_id": body.id.clone(),
+                ":resolve_id": body.conversation_id.clone(),
+                ":member_conversation": body.conversation_id.clone(),
+                ":member_user": member_user,
+            },
+        )
+        .await?;
+    let row = rows
+        .next()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("send probe returned no row"))?;
+    let stored = match row.get::<Option<String>>(0)? {
+        Some(conversation_id) => Some((conversation_id, row.get(1)?, row.get(2)?)),
+        None => None,
+    };
+    Ok(SendProbe {
+        stored,
+        resolved: crate::directory::decode_resolved(&row, 3, &body.conversation_id)?,
+        member: row.get::<i64>(6)? != 0,
+    })
+}
+
+/// The admission checks and the write of a send, on what [`send_probe`] read.
+async fn apply_send_probed(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &SendMessageBody,
+    actor: SendActor,
+    probe: &SendProbe,
+) -> anyhow::Result<WriteOutcome> {
+    let (_, stored_sender) = match actor {
+        Ok(actor) => actor,
+        Err(o) => return Ok(o),
+    };
+    if authed.is_some() && !probe.member {
         return Ok(WriteOutcome::Forbidden);
     }
     // The stamp is the delivery cursor every recipient will adopt — bounded
@@ -430,14 +509,13 @@ pub async fn apply_send_message(
             "delete_token_hash is required on every new envelope",
         ));
     }
-    // Sequence allocation and row land together (see `insert_envelope_with_seq`).
-    let tx = crate::db::write_tx(conn).await?;
-    insert_envelope_with_seq(
-        &tx,
+    // One autocommit statement: the database assigns the seq (see `insert_envelope`).
+    insert_envelope(
+        conn,
         &body.conversation_id,
         // Deletion capability (#1086): an HMAC only the author's devices can compute; stored as sent.
         "id, sender_id, ciphertext, reply_to_id, sent_at, sealed, delete_token_hash",
-        "?3, ?4, ?5, ?6, ?7, ?8, ?9",
+        "?2, ?3, ?4, ?5, ?6, ?7, ?8",
         vec![
             body.id.clone().into(),
             stored_sender.into(),
@@ -449,7 +527,6 @@ pub async fn apply_send_message(
         ],
     )
     .await?;
-    tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
 
@@ -485,10 +562,20 @@ pub async fn edit_message(
 /// owning group, a DM's own id. An id the directory does not know resolves to
 /// itself, which is the DM shape and what the in-process tests use.
 async fn mls_group_of(conn: &Connection, conversation_id: &str) -> anyhow::Result<String> {
-    Ok(crate::directory::resolve_conversation(conn, conversation_id)
-        .await?
+    Ok(group_of(
+        crate::directory::resolve_conversation(conn, conversation_id).await?,
+        conversation_id,
+    ))
+}
+
+/// [`mls_group_of`] from an already-read resolution.
+fn group_of(
+    resolved: Option<(String, crate::directory::ConversationKind)>,
+    conversation_id: &str,
+) -> String {
+    resolved
         .map(|(g, _)| g)
-        .unwrap_or_else(|| conversation_id.to_string()))
+        .unwrap_or_else(|| conversation_id.to_string())
 }
 
 /// An envelope's asserted lineage, or `None` when the client asserted nothing
@@ -521,7 +608,7 @@ async fn behind_head(
 async fn apply_at_head<F, Fut>(
     main: &Connection,
     log: &Connection,
-    conversation_id: &str,
+    mls_group_id: &str,
     id: &str,
     asserted: Lineage,
     apply: F,
@@ -530,15 +617,14 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<WriteOutcome>>,
 {
-    let mls_group_id = mls_group_of(main, conversation_id).await?;
-    if let Some(behind) = behind_head(log, &mls_group_id, asserted).await? {
+    if let Some(behind) = behind_head(log, mls_group_id, asserted).await? {
         return Ok(behind);
     }
     let outcome = apply().await?;
     if !matches!(outcome, WriteOutcome::Ok) {
         return Ok(outcome);
     }
-    let Some(behind) = behind_head(log, &mls_group_id, asserted).await? else {
+    let Some(behind) = behind_head(log, mls_group_id, asserted).await? else {
         return Ok(WriteOutcome::Ok);
     };
     main.execute(
@@ -575,16 +661,22 @@ pub async fn send_envelope_once(
     body: &SendMessageBody,
 ) -> anyhow::Result<(WriteOutcome, bool)> {
     let _one_at_a_time = EnvelopeIdLock::acquire(&body.id).await;
-    if let Some(replay) = replayed_send(main, body).await? {
+    // One read for the replay check, the epoch gate's group and the membership
+    // check (#2180), evaluated below in the order they always were: replay,
+    // then the head, then the actor and membership, then the body.
+    let actor = send_actor(authed, body);
+    let probe = send_probe(main, body, &actor).await?;
+    if let Some(replay) = replayed_send(&probe, body) {
         return Ok((replay, true));
     }
+    let mls_group_id = group_of(probe.resolved.clone(), &body.conversation_id);
     let outcome = apply_at_head(
         main,
         log,
-        &body.conversation_id,
+        &mls_group_id,
         &body.id,
         body.generation.zip(body.epoch),
-        || apply_send_message(main, authed, body),
+        || apply_send_probed(main, authed, body, actor, &probe),
     )
     .await?;
     Ok((outcome, false))
@@ -596,34 +688,19 @@ pub async fn send_envelope_once(
 /// `Ok` only for the SAME message from the SAME author (matching #1086 hash), not current membership.
 ///
 /// Anything else is `Forbidden`, as for a non-member, so the id's existence leaks nothing.
-async fn replayed_send(
-    main: &Connection,
-    body: &SendMessageBody,
-) -> anyhow::Result<Option<WriteOutcome>> {
+fn replayed_send(probe: &SendProbe, body: &SendMessageBody) -> Option<WriteOutcome> {
     use subtle::ConstantTimeEq;
-    let mut rows = main
-        .query(
-            "SELECT conversation_id, type, delete_token_hash FROM message_envelope \
-             WHERE id = ?1 LIMIT 1",
-            libsql::params![body.id.clone()],
-        )
-        .await?;
-    let Some(row) = rows.next().await? else {
-        return Ok(None);
-    };
-    let conversation_id: String = row.get(0)?;
-    let kind: String = row.get(1)?;
-    let stored_hash: Option<String> = row.get(2)?;
+    let (conversation_id, kind, stored_hash) = probe.stored.as_ref()?;
     let same_author = match (stored_hash.as_deref(), body.delete_token_hash.as_deref()) {
         (Some(stored), Some(sent)) if !stored.is_empty() => {
             bool::from(stored.as_bytes().ct_eq(sent.as_bytes()))
         }
         _ => false,
     };
-    if conversation_id == body.conversation_id && kind == "message" && same_author {
-        return Ok(Some(WriteOutcome::Ok));
+    if *conversation_id == body.conversation_id && kind == "message" && same_author {
+        return Some(WriteOutcome::Ok);
     }
-    Ok(Some(WriteOutcome::Forbidden))
+    Some(WriteOutcome::Forbidden)
 }
 
 /// The per-envelope-id lock [`send_envelope_once`] holds (see there). Entries
@@ -678,10 +755,11 @@ pub async fn edit_envelope(
     authed: Option<&str>,
     body: &EditMessageBody,
 ) -> anyhow::Result<WriteOutcome> {
+    let mls_group_id = mls_group_of(main, &body.conversation_id).await?;
     apply_at_head(
         main,
         log,
-        &body.conversation_id,
+        &mls_group_id,
         &body.envelope_id,
         body.generation.zip(body.epoch),
         || apply_edit_message(main, authed, body),
@@ -735,11 +813,11 @@ pub async fn apply_edit_message(
         libsql::params![body.conversation_id.clone(), body.target_message_id.clone()],
     )
     .await?;
-    insert_envelope_with_seq(
+    insert_envelope(
         &tx,
         &body.conversation_id,
         "id, sender_id, ciphertext, sent_at, type, target_message_id, delete_token_hash",
-        "?3, ?4, ?5, ?6, 'edit', ?7, ?8",
+        "?2, ?3, ?4, ?5, 'edit', ?6, ?7",
         vec![
             body.envelope_id.clone().into(),
             sender.into(),
@@ -929,55 +1007,76 @@ async fn edit_capability_hash(
     }
 }
 
-/// Take the next delivery sequence for `conversation_id` (#1087).
-///
-/// Uses `conversation_seq`, never `MAX(seq)+1`: GC empties rows, which would reissue seqs below every cursor (#692).
-///
-/// GC never touches the counter; only conversation teardown does.
-async fn next_delivery_seq(conn: &Connection, conversation_id: &str) -> anyhow::Result<i64> {
-    let mut rows = conn
-        .query(
-            "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, 1) \
-             ON CONFLICT(conversation_id) DO UPDATE SET next_seq = next_seq + 1 \
-             RETURNING next_seq",
-            libsql::params![conversation_id.to_string()],
-        )
-        .await?;
-    let row = rows
-        .next()
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("conversation_seq returned no row for {conversation_id}"))?;
-    Ok(row.get::<i64>(0)?)
-}
+/// The two triggers that give every envelope its delivery sequence (#1087,
+/// migration 000058): `message_envelope_assign_seq` stamps a row inserted
+/// without one with its conversation's next `conversation_seq` value, in the
+/// same statement; `message_envelope_seq_from_counter` refuses a row that
+/// names any seq but the counter's.
+const SEQ_TRIGGERS_PRESENT: &str = "(SELECT COUNT(*) FROM sqlite_schema \
+     WHERE type = 'trigger' \
+       AND name IN ('message_envelope_assign_seq', 'message_envelope_seq_from_counter')) = 2";
 
-/// Insert an envelope, assigning it the next delivery sequence (#1087).
+/// Insert an envelope; the database assigns its delivery sequence (#1087, #2180).
 ///
 /// **Every envelope goes through here** — send, edit, tombstone. The sequence is
 /// what recipients fetch by, what their cursor points into, and what retention
-/// compares against, so a writer that skipped it would create an envelope
-/// delivered to nobody and collected by nothing.
+/// compares against, so an envelope without one would be delivered to nobody
+/// and collected by nothing.
 ///
-/// **Takes a `Transaction`**: a writer between allocate and insert would make `N+1` visible before `N`, losing `N`.
+/// The row names no `seq`: `message_envelope_assign_seq` bumps the
+/// conversation's `conversation_seq` (never `MAX(seq)+1`: GC empties
+/// conversations, #692) and stamps the row inside this one statement, so
+/// allocation and insert commit or roll back together, and a failed insert
+/// consumes no seq. A send runs it alone, in autocommit, holding the write
+/// lock for one statement; an edit or tombstone runs it in its transaction.
 ///
-/// `columns` names the columns AFTER `conversation_id` and `seq`; `placeholders`
-/// supplies them starting at `?3`, and `params` binds them in that order.
-async fn insert_envelope_with_seq(
-    tx: &libsql::Transaction,
+/// **Fails closed.** The INSERT is conditioned on both triggers existing and
+/// must store exactly one row: on a database the migration never reached it
+/// stores nothing and errors, so the client keeps the message and retries,
+/// rather than an envelope without a seq being acknowledged and lost.
+///
+/// `columns` names the columns AFTER `conversation_id`; `placeholders`
+/// supplies them starting at `?2`, and `params` binds them in that order.
+async fn insert_envelope(
+    conn: &Connection,
     conversation_id: &str,
     columns: &str,
     placeholders: &str,
     params: Vec<libsql::Value>,
 ) -> anyhow::Result<()> {
-    let seq = next_delivery_seq(tx, conversation_id).await?;
     let sql = format!(
-        "INSERT INTO message_envelope (conversation_id, seq, {columns}) \
-         VALUES (?1, ?2, {placeholders})"
+        "INSERT INTO message_envelope (conversation_id, {columns}) \
+         SELECT ?1, {placeholders} WHERE {SEQ_TRIGGERS_PRESENT}"
     );
-    let mut bound: Vec<libsql::Value> = Vec::with_capacity(params.len() + 2);
+    let mut bound: Vec<libsql::Value> = Vec::with_capacity(params.len() + 1);
     bound.push(conversation_id.into());
-    bound.push(seq.into());
     bound.extend(params);
-    tx.execute(&sql, bound).await?;
+    let stored = conn.execute(&sql, bound).await?;
+    if stored != 1 {
+        anyhow::bail!(
+            "envelope not stored: this database lacks the delivery-sequence triggers \
+             (migration 000058)"
+        );
+    }
+    Ok(())
+}
+
+/// Refuse to serve without the delivery-sequence triggers (#2180): checked at
+/// startup, as every insert also checks for itself ([`insert_envelope`]).
+pub async fn require_seq_triggers(conn: &Connection) -> anyhow::Result<()> {
+    let mut rows = conn
+        .query(&format!("SELECT {SEQ_TRIGGERS_PRESENT}"), ())
+        .await?;
+    let present = match rows.next().await? {
+        Some(row) => row.get::<i64>(0)? != 0,
+        None => false,
+    };
+    if !present {
+        anyhow::bail!(
+            "the main database lacks the delivery-sequence triggers: apply migration 000058 \
+             (scripts/db-apply.sh) before starting this DS"
+        );
+    }
     Ok(())
 }
 
@@ -1050,11 +1149,11 @@ pub async fn apply_delete_message(
     // nothing; the admin holds no other proof of which message it was.
     let proofs: Vec<String> = removed.into_iter().collect();
     release_message_references(&tx, &body.message_id, &proofs).await?;
-    insert_envelope_with_seq(
+    insert_envelope(
         &tx,
         &body.conversation_id,
         "id, sender_id, ciphertext, sent_at, type, target_message_id",
-        "?3, ?4, '', ?5, 'delete', ?6",
+        "?2, ?3, '', ?4, 'delete', ?5",
         vec![
             tombstone_id.into(),
             actor.into(),
@@ -2570,19 +2669,20 @@ mod gc_sql_tests {
 
     /// Insert one envelope at delivery sequence `seq`.
     async fn add_envelope(conn: &Connection, id: &str, conv: &str, seq: i64) {
+        // Take `seq` from the counter first, as a DS writing an explicit seq must
+        // (migration 000058 refuses any other value).
+        conn.execute(
+            "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, ?2) \
+             ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)",
+            libsql::params![conv.to_string(), seq],
+        )
+        .await
+        .unwrap();
         conn.execute(
             "INSERT INTO message_envelope \
                  (id, conversation_id, sent_at, sender_id, ciphertext, seq) \
              VALUES (?1, ?2, datetime('now'), 'sender', 'ct', ?3)",
             libsql::params![id.to_string(), conv.to_string(), seq],
-        )
-        .await
-        .unwrap();
-        // Keep `conversation_seq` consistent, as `insert_envelope_with_seq` does.
-        conn.execute(
-            "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, ?2) \
-             ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)",
-            libsql::params![conv.to_string(), seq],
         )
         .await
         .unwrap();
@@ -3250,19 +3350,20 @@ mod roster_parity_tests {
     }
 
     async fn envelope(conn: &Connection, id: &str, conv: &str, seq: i64) {
+        // Take `seq` from the counter first, as a DS writing an explicit seq must
+        // (migration 000058 refuses any other value).
+        conn.execute(
+            "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, ?2) \
+             ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)",
+            libsql::params![conv.to_string(), seq],
+        )
+        .await
+        .unwrap();
         conn.execute(
             "INSERT INTO message_envelope \
                  (id, conversation_id, sent_at, sender_id, ciphertext, seq) \
              VALUES (?1, ?2, datetime('now'), 'sender', 'ct', ?3)",
             libsql::params![id.to_string(), conv.to_string(), seq],
-        )
-        .await
-        .unwrap();
-        // Keep `conversation_seq` consistent, as `insert_envelope_with_seq` does.
-        conn.execute(
-            "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, ?2) \
-             ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)",
-            libsql::params![conv.to_string(), seq],
         )
         .await
         .unwrap();
@@ -4530,6 +4631,110 @@ mod epoch_gate_tests {
         assert!(!stored(&c, "m1").await);
         assert!(stored(&c, "m2").await);
     }
+
+    /// #2180 folds the replay check, the epoch gate's resolve and the
+    /// membership check into one read. The answers, and which check wins when
+    /// several would refuse, must be exactly what they were when each was its
+    /// own read: replay first, then the head, then the actor and membership,
+    /// then the body.
+    #[tokio::test]
+    async fn the_folded_send_checks_keep_their_order() {
+        let c = conn().await;
+        c.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('g', 'group');
+             INSERT INTO groups (id, name, owner_id) VALUES ('g', 'G', 'alice');
+             INSERT INTO group_member (group_id, user_id) VALUES ('g', 'alice');
+             INSERT INTO conversation (id, kind) VALUES ('ch', 'channel');
+             INSERT INTO channels (id, group_id, name) VALUES ('ch', 'g', 'general');",
+        )
+        .await
+        .unwrap();
+        // The channel's MLS group `g` is at head (0, 1); `dm` (an unknown id,
+        // its own group) at head (0, 0).
+        append_commit(&c, "g", 0, 0).await;
+        let at = |id: &str, epoch: i64| send(id, "ch", Some(0), Some(epoch));
+        let run = |authed: Option<&'static str>, body: SendMessageBody| {
+            let c = c.clone();
+            async move { send_envelope_once(&c, &c, authed, &body).await.unwrap() }
+        };
+
+        // A send at the head by a member lands.
+        let (out, replayed) = run(Some("alice"), at("m1", 1)).await;
+        assert!(matches!(out, WriteOutcome::Ok) && !replayed, "{out:?}");
+
+        // Replay by the same author, at a stale epoch: Ok, nothing written,
+        // and the head is never consulted (its post-check would delete m1).
+        let (out, replayed) = run(Some("alice"), at("m1", 0)).await;
+        assert!(matches!(out, WriteOutcome::Ok) && replayed, "{out:?}");
+        assert!(stored(&c, "m1").await);
+
+        // The same id from another author (another capability): Forbidden,
+        // as for a non-member, so the id's existence reveals nothing.
+        let mut other = at("m1", 1);
+        other.delete_token_hash = Some("another-authors-capability".into());
+        let (out, replayed) = run(Some("bob"), other).await;
+        assert!(matches!(out, WriteOutcome::Forbidden) && replayed, "{out:?}");
+
+        // The same id and capability, aimed at another conversation: Forbidden.
+        let mut elsewhere = send("m1", "dm", Some(0), Some(0));
+        elsewhere.delete_token_hash = at("m1", 1).delete_token_hash;
+        let (out, replayed) = run(Some("alice"), elsewhere).await;
+        assert!(matches!(out, WriteOutcome::Forbidden) && replayed, "{out:?}");
+
+        // A non-member at a stale epoch learns the head (EpochBehind), not Forbidden.
+        let (out, _) = run(Some("bob"), at("m2", 0)).await;
+        assert!(
+            matches!(out, WriteOutcome::EpochBehind { head_generation: 0, head_epoch: 1 }),
+            "{out:?}"
+        );
+        // A non-member at the head is Forbidden.
+        let (out, _) = run(Some("bob"), at("m2", 1)).await;
+        assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+        assert!(!stored(&c, "m2").await);
+
+        // Sealed: the membership checked is the SIGNER's, never the stored
+        // sentinel's. Bob claiming alice's name as the sentinel is still bob.
+        let mut sealed_as_alice = at("m3", 1);
+        sealed_as_alice.sender_id = Some("alice".into());
+        let (out, _) = run(Some("bob"), sealed_as_alice).await;
+        assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+
+        // Unsealed and signed by someone other than the named sender: the
+        // actor refusal, which comes after the head (a stale one still wins).
+        let mut unsealed = at("m4", 1);
+        unsealed.sealed = 0;
+        unsealed.sender_id = Some("bob".into());
+        let (out, _) = run(Some("alice"), unsealed).await;
+        assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+        let mut unsealed_stale = at("m4", 0);
+        unsealed_stale.sealed = 0;
+        unsealed_stale.sender_id = Some("bob".into());
+        let (out, _) = run(Some("alice"), unsealed_stale).await;
+        assert!(matches!(out, WriteOutcome::EpochBehind { .. }), "{out:?}");
+
+        // A member's bad body: the stamp, then the capability.
+        let mut bad_stamp = at("m5", 1);
+        bad_stamp.sent_at = "yesterday".into();
+        let (out, _) = run(Some("alice"), bad_stamp).await;
+        assert!(matches!(out, WriteOutcome::Invalid(_)), "{out:?}");
+        let mut no_capability = at("m6", 1);
+        no_capability.delete_token_hash = None;
+        let (out, _) = run(Some("alice"), no_capability).await;
+        assert!(matches!(out, WriteOutcome::Invalid(_)), "{out:?}");
+        // A non-member's bad body is still just Forbidden.
+        let mut bob_bad_stamp = at("m7", 1);
+        bob_bad_stamp.sent_at = "yesterday".into();
+        let (out, _) = run(Some("bob"), bob_bad_stamp).await;
+        assert!(matches!(out, WriteOutcome::Forbidden), "{out:?}");
+
+        // The no-auth path checks no membership.
+        let (out, _) = run(None, at("m8", 1)).await;
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+
+        for id in ["m3", "m4", "m5", "m6", "m7"] {
+            assert!(!stored(&c, id).await, "{id} was refused but stored");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -4674,12 +4879,11 @@ mod delete_capability_tests_support {
     ///
     /// A direct insert: since #1135 the send endpoint refuses such a body.
     pub(super) async fn insert_pre_1135_envelope(conn: &Connection, id: &str) {
-        let seq = next_delivery_seq(conn, "c1").await.unwrap();
         conn.execute(
             "INSERT INTO message_envelope \
-                 (id, conversation_id, sender_id, ciphertext, sent_at, sealed, seq) \
-             VALUES (?1, 'c1', 'sealed', 'mls:00', ?2, 1, ?3)",
-            libsql::params![id.to_string(), chrono::Utc::now().to_rfc3339(), seq],
+                 (id, conversation_id, sender_id, ciphertext, sent_at, sealed) \
+             VALUES (?1, 'c1', 'sealed', 'mls:00', ?2, 1)",
+            libsql::params![id.to_string(), chrono::Utc::now().to_rfc3339()],
         )
         .await
         .unwrap();
@@ -5243,11 +5447,11 @@ mod delivery_sequence_tests {
 
         // A send caught mid-flight: sequence taken, row written, not yet committed.
         let tx = crate::db::write_tx(&writer).await.unwrap();
-        insert_envelope_with_seq(
+        insert_envelope(
             &tx,
             "c1",
             "id, sender_id, ciphertext, sent_at, sealed",
-            "?3, ?4, ?5, ?6, 1",
+            "?2, ?3, ?4, ?5, 1",
             vec![
                 "m2".into(),
                 "sealed".into(),
@@ -5509,8 +5713,26 @@ mod delivery_sequence_backfill_tests {
             vec![("m1".to_string(), 1), ("m2".to_string(), 2)]
         );
 
-        let next = next_delivery_seq(&conn, "c1").await.unwrap();
-        assert_eq!(next, 3, "the next send must continue, not collide with m2");
+        let (_, _, trigger) = pollis_schema::POST_BASELINE_MIGRATIONS
+            .iter()
+            .find(|(v, _, _)| *v == 58)
+            .expect("000058 is registered");
+        conn.execute_batch(trigger).await.expect("000058");
+        insert_envelope(
+            &conn,
+            "c1",
+            "id, sender_id, ciphertext, sent_at",
+            "?2, 'sender', 'ct', ?3",
+            vec!["m3".into(), "2026-01-01T00:00:03+00:00".into()],
+        )
+        .await
+        .unwrap();
+        let next = seqs(&conn, "c1").await.last().cloned();
+        assert_eq!(
+            next,
+            Some(("m3".to_string(), 3)),
+            "the next send must continue, not collide with m2"
+        );
     }
 
     /// An existing cursor maps to the highest sequence at or below where that
@@ -5557,7 +5779,7 @@ mod envelope_insert_site_tests {
     use std::path::{Path, PathBuf};
 
     /// The only production function allowed to INSERT into `message_envelope`.
-    const ALLOWED_FN: &str = "insert_envelope_with_seq";
+    const ALLOWED_FN: &str = "insert_envelope";
 
     /// Every envelope must carry a delivery sequence, and the only way to be
     /// sure is for every write to go through the one function that assigns one.

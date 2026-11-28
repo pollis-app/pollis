@@ -210,7 +210,18 @@ pub async fn apply_register_device(
 ///
 /// `reported_at = datetime('now')` marks the device LIVE, so the #720 dormancy bound bites.
 ///
-/// The cursor is `conversation_seq.next_seq`: the device has consumed the backlog (#1087).
+/// The cursor is `conversation_seq.next_seq`: a NEW device starts empty, the
+/// second of the three accepted losses (#1087, #1735).
+///
+/// **Only for a device that has never published a cert** (`mls_signature_pub
+/// IS NULL`), checked in the same statement: that is the moment a device
+/// becomes real (#1092), and the only one at which "everything before now is
+/// not yours" is true. A device that already exists publishes again on every
+/// unlock, and seeding it then would put its cursor past mail it never fetched
+/// (a channel created while it was locked, whose row it did not have yet): a
+/// silent loss. Such a device's missing row reads as "fetch everything"
+/// instead; channel creation seeds every live member device at the start
+/// (`groups::apply_create_channel`).
 ///
 /// Called at cert publish, not at register — see [`apply_register_device`].
 pub async fn seed_conversation_watermarks(
@@ -226,7 +237,10 @@ pub async fn seed_conversation_watermarks(
                 COALESCE((SELECT next_seq FROM conversation_seq WHERE conversation_id = c.id), 0), \
                 datetime('now') \
          FROM channels c \
-         JOIN group_member gm ON gm.group_id = c.group_id AND gm.user_id = ?1",
+         JOIN group_member gm ON gm.group_id = c.group_id AND gm.user_id = ?1 \
+         WHERE EXISTS (SELECT 1 FROM user_device ud \
+                        WHERE ud.device_id = ?2 AND ud.user_id = ?1 \
+                          AND ud.mls_signature_pub IS NULL)",
         libsql::params![user_id.to_string(), device_id.to_string(), cursor.clone()],
     )
     .await?;
@@ -237,7 +251,10 @@ pub async fn seed_conversation_watermarks(
                 COALESCE((SELECT next_seq FROM conversation_seq \
                            WHERE conversation_id = dcm.dm_channel_id), 0), \
                 datetime('now') \
-         FROM dm_channel_member dcm WHERE dcm.user_id = ?1",
+         FROM dm_channel_member dcm WHERE dcm.user_id = ?1 \
+           AND EXISTS (SELECT 1 FROM user_device ud \
+                        WHERE ud.device_id = ?2 AND ud.user_id = ?1 \
+                          AND ud.mls_signature_pub IS NULL)",
         libsql::params![user_id.to_string(), device_id.to_string(), cursor],
     )
     .await?;
@@ -399,9 +416,15 @@ pub async fn apply_publish_device_cert(
         return Ok(PublishCertOutcome::CertInvalid);
     }
 
+    // One transaction: the seed reads whether this is the device's FIRST
+    // publish (`mls_signature_pub` still NULL), which the UPDATE then ends.
+    let tx = crate::db::write_tx(conn).await?;
+    // #1092: here the device becomes real, so here it starts pinning retention.
+    seed_conversation_watermarks(&tx, user_id, device_id).await?;
+
     // Bound to the session user; populating `mls_signature_pub` is what makes the
     // device device-signature-authenticatable from here on.
-    let affected = conn
+    let affected = tx
         .execute(
             "UPDATE user_device \
              SET device_cert = ?1, cert_issued_at = ?2, cert_identity_version = ?3, \
@@ -420,11 +443,10 @@ pub async fn apply_publish_device_cert(
         .await?;
     if affected == 0 {
         // The device row isn't the actor's (or doesn't exist) — register first.
+        tx.rollback().await?;
         return Ok(PublishCertOutcome::DeviceNotRegistered);
     }
-
-    // #1092: here the device becomes real, so here it starts pinning retention.
-    seed_conversation_watermarks(conn, user_id, device_id).await?;
+    tx.commit().await?;
 
     Ok(PublishCertOutcome::Applied)
 }

@@ -131,9 +131,14 @@ where
         sql: String,
         want_rows: bool,
     ) -> crate::Result<Self> {
-        let desc = stream.describe(&sql).await?;
-
-        let cols: Vec<_> = desc.cols.into_iter().map(|col| col.name).collect();
+        // POLLIS (#2178): upstream awaits `stream.describe(&sql)` here, a whole
+        // `/v3/pipeline` round trip before the statement's own `/v3/cursor`.
+        // Its answer only fed `Statement::columns()`/`column_count()`, which
+        // nothing in the workspace calls on a remote statement; `Rows` take
+        // their columns from the cursor's `step_begin`. So a remote prepare is
+        // now free and every read costs one request. A bad statement still
+        // fails, one step later, at the cursor or execute.
+        let cols: Vec<String> = Vec::new();
 
         // in SQLite when a multiple statements are glued together into one string, only the first one is
         // executed and then a handle to continue execution is returned. However Hrana API doesn't allow

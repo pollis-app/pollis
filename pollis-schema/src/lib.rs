@@ -339,6 +339,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "attachment_dedup",
         include_str!("../migrations/000057_attachment_dedup.sql"),
     ),
+    (
+        58,
+        "envelope_seq_trigger",
+        include_str!("../migrations/000058_envelope_seq_trigger.sql"),
+    ),
 ];
 
 /// Every main-DB script in apply order, one per file: trigger bodies break a `;` split.

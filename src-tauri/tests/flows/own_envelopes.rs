@@ -164,11 +164,11 @@ async fn a_reused_key_on_a_new_envelope_is_still_reported() {
         }
     }
     let list = cols.join(", ");
+    // No `seq`: the database gives the copy the next one (migration 000058).
     conn.execute(
         &format!(
-            "INSERT INTO message_envelope (id, seq, {list}) \
-             SELECT ?1, (SELECT MAX(seq) + 1 FROM message_envelope), {list} \
-             FROM message_envelope WHERE id = ?2"
+            "INSERT INTO message_envelope (id, {list}) \
+             SELECT ?1, {list} FROM message_envelope WHERE id = ?2"
         ),
         libsql::params![forged.clone(), original.clone()],
     )

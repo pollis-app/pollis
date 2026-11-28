@@ -50,7 +50,7 @@ use crate::error::AppError;
 use crate::reads::authed_user;
 use crate::writes::RawRequest;
 use crate::AppState;
-use crate::util::{BIND_CHUNK, placeholders};
+use crate::util::{BIND_CHUNK, MAX_BIND_PARAMS, placeholders};
 
 /// Expo's push service endpoint. Accepts a JSON array of up to 100 messages.
 pub(crate) const EXPO_PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
@@ -695,24 +695,13 @@ async fn send_batch(
         );
     }
     let now = crate::util::now_unix() as i64;
+    let mut ok_tickets: Vec<(String, &String)> = Vec::new();
     for (outcome, token) in tickets.into_iter().zip(tokens) {
         match outcome {
             PushOutcome::Ok { id } => {
                 stats.with(|c| c.tickets_ok += 1);
-                let Some(id) = id else {
-                    continue;
-                };
-                // Best-effort, like everything here: a DS running before
-                // migration 000037 fails this and simply checks no receipt.
-                let stored = conn
-                    .execute(
-                        "INSERT OR IGNORE INTO push_ticket (ticket_id, token, created_at) \
-                         VALUES (?1, ?2, ?3)",
-                        libsql::params![id, token.clone(), now],
-                    )
-                    .await;
-                if let Err(e) = stored {
-                    tracing::debug!("push_ticket insert skipped: {e}");
+                if let Some(id) = id {
+                    ok_tickets.push((id, token));
                 }
             }
             PushOutcome::Error(class) => {
@@ -723,6 +712,35 @@ async fn send_batch(
                 }
             }
         }
+    }
+    store_tickets(conn, &ok_tickets, now).await;
+}
+
+/// Record one Expo batch's ok tickets for the receipt check, in one INSERT
+/// (#2182; at most [`EXPO_BATCH`] rows of 3 binds). Best-effort, like
+/// everything here: a ticket only drives `DeviceNotRegistered` pruning, never
+/// delivery, so a failure is logged and dropped (a DS running before migration
+/// 000037 simply checks no receipt). `OR IGNORE` skips a row that would break a
+/// constraint (a duplicate, an overlong id) and keeps the rest.
+async fn store_tickets(conn: &Connection, tickets: &[(String, &String)], now: i64) {
+    if tickets.is_empty() {
+        return;
+    }
+    let rows = vec!["(?, ?, ?)"; tickets.len()].join(", ");
+    let mut params: Vec<libsql::Value> = Vec::with_capacity(tickets.len() * 3);
+    for (id, token) in tickets {
+        params.push(id.clone().into());
+        params.push((*token).clone().into());
+        params.push(now.into());
+    }
+    let stored = conn
+        .execute(
+            &format!("INSERT OR IGNORE INTO push_ticket (ticket_id, token, created_at) VALUES {rows}"),
+            params,
+        )
+        .await;
+    if let Err(e) = stored {
+        tracing::debug!("push_ticket insert skipped: {e}");
     }
 }
 
@@ -1082,35 +1100,89 @@ pub async fn mint_push_handles_for(
     message: Option<&PushMessage>,
 ) -> HashMap<String, String> {
     use base64::Engine as _;
-    let mut out = HashMap::new();
+    // One handle per recipient user, minted in memory.
+    let mut minted: Vec<(String, String)> = Vec::with_capacity(user_ids.len());
+    let mut seen = std::collections::HashSet::with_capacity(user_ids.len());
     for user in user_ids {
+        if !seen.insert(user.as_str()) {
+            continue;
+        }
         let mut raw = [0u8; 16];
         OsRng.fill_bytes(&mut raw);
         let handle = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw);
-        let wrote = conn
-            .execute(
-                "INSERT INTO push_handle \
-                 (handle, user_id, conversation_id, kind, message_id, message_sent_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                libsql::params![
-                    handle.clone(),
-                    user.clone(),
-                    conversation_id.to_string(),
-                    kind.to_string(),
-                    message.map(|m| m.id.clone()),
-                    message.map(|m| m.sent_at.clone())
-                ],
-            )
-            .await;
-        match wrote {
-            Ok(_) => {
-                out.insert(user.clone(), handle);
+        minted.push((user.clone(), handle));
+    }
+    // Written a chunk per statement (#2182): each chunk is ONE autocommit
+    // INSERT, awaited here, so every handle is committed before the caller
+    // posts its first push. Never a transaction held across the Expo call.
+    let mut out = HashMap::new();
+    for chunk in minted.chunks(MAX_BIND_PARAMS / HANDLE_BINDS) {
+        match insert_push_handles(conn, chunk, conversation_id, kind, message).await {
+            Ok(()) => out.extend(chunk.iter().cloned()),
+            Err(e) => {
+                // No user id: push logs name no one (#1423).
+                tracing::warn!("push handle batch insert failed, writing them one by one: {e}");
+                // A transient failure leaves this connection's stream suspect:
+                // record the fault (#1500; the pool then drops the connection
+                // and the database's sockets) and continue on a new stream.
+                // Never inside a transaction, whose statements must stay on
+                // its own stream (every caller writes in autocommit).
+                let err = anyhow::Error::from(e);
+                if crate::error::note_transient(&err) && conn.is_autocommit() {
+                    conn.reset().await;
+                }
+                for row in chunk {
+                    match insert_push_handles(conn, std::slice::from_ref(row), conversation_id, kind, message)
+                        .await
+                    {
+                        Ok(()) => {
+                            out.insert(row.0.clone(), row.1.clone());
+                        }
+                        Err(e) => tracing::warn!("push handle insert failed: {e}"),
+                    }
+                }
             }
-            // No user id: push logs name no one (#1423).
-            Err(e) => tracing::warn!("push handle insert failed: {e}"),
         }
     }
     out
+}
+
+/// Bind parameters per `push_handle` row in [`insert_push_handles`].
+const HANDLE_BINDS: usize = 6;
+
+/// Write `rows` (`(user_id, handle)`) in one INSERT.
+///
+/// `ON CONFLICT(handle) DO NOTHING`: a handle is 128 random bits, so the only
+/// row it can meet is its own, from an attempt whose answer was lost; the
+/// retry then succeeds with the row already in place. Any other violation
+/// still fails the statement.
+async fn insert_push_handles(
+    conn: &Connection,
+    rows: &[(String, String)],
+    conversation_id: &str,
+    kind: &str,
+    message: Option<&PushMessage>,
+) -> libsql::Result<()> {
+    let values = vec!["(?, ?, ?, ?, ?, ?)"; rows.len()].join(", ");
+    let mut params: Vec<libsql::Value> = Vec::with_capacity(rows.len() * HANDLE_BINDS);
+    for (user, handle) in rows {
+        params.push(handle.clone().into());
+        params.push(user.clone().into());
+        params.push(conversation_id.to_string().into());
+        params.push(kind.to_string().into());
+        params.push(message.map(|m| m.id.clone()).into());
+        params.push(message.map(|m| m.sent_at.clone()).into());
+    }
+    conn.execute(
+        &format!(
+            "INSERT INTO push_handle \
+             (handle, user_id, conversation_id, kind, message_id, message_sent_at) \
+             VALUES {values} ON CONFLICT(handle) DO NOTHING"
+        ),
+        params,
+    )
+    .await?;
+    Ok(())
 }
 
 async fn is_dm(conn: &Connection, conversation_id: &str) -> anyhow::Result<bool> {
@@ -3184,5 +3256,158 @@ mod tests {
         let cut = read_cutoffs(&entries, 100);
         assert_eq!(cut["c"].at_unix, 99);
         assert_eq!(cut["c"].through, Some(at("2026-11-19T10:00:02Z", "b")));
+    }
+
+    // #2182: handles and tickets are written in batches.
+
+    /// A channel `ch-2182` in group `g-2182` with `n` members, one token each.
+    async fn wide_channel(n: usize) -> (tempfile::TempDir, std::sync::Arc<crate::db::Db>) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = std::sync::Arc::new(
+            crate::db::Db::connect_local(dir.path().join("db.db").to_str().unwrap())
+                .await
+                .unwrap(),
+        );
+        let c = db.conn().await.unwrap();
+        pollis_schema::apply::single_db(&c).await.unwrap();
+        let mut sql = String::from(
+            "INSERT INTO conversation (id, kind) VALUES ('g-2182', 'group');
+             INSERT INTO groups (id, name, owner_id) VALUES ('g-2182', 'G', 'u0');
+             INSERT INTO conversation (id, kind) VALUES ('ch-2182', 'channel');
+             INSERT INTO channels (id, group_id, name) VALUES ('ch-2182', 'g-2182', 'general');",
+        );
+        for u in 0..n {
+            sql.push_str(&format!(
+                "INSERT INTO group_member (group_id, user_id, role) VALUES ('g-2182', 'u{u}', 'member');
+                 INSERT INTO push_token (token, user_id, platform, updated_at) \
+                 VALUES ('ExponentPushToken[u{u}]', 'u{u}', 'android', '2026-10-24T00:00:00Z');"
+            ));
+        }
+        c.execute_batch(&sql).await.unwrap();
+        (dir, db)
+    }
+
+    /// A fake Expo that, on each request, counts the handle rows a SECOND
+    /// connection can see, and answers an ok ticket per message.
+    async fn counting_expo(
+        db: std::sync::Arc<crate::db::Db>,
+    ) -> (String, std::sync::Arc<Mutex<Vec<(usize, i64)>>>) {
+        use axum::routing::post;
+        let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let seen2 = seen.clone();
+        let app = axum::Router::new().route(
+            "/",
+            post(move |Json(sent): Json<serde_json::Value>| {
+                let seen = seen2.clone();
+                let db = db.clone();
+                async move {
+                    let c = db.conn().await.unwrap();
+                    let mut rows = c
+                        .query("SELECT COUNT(*) FROM push_handle WHERE conversation_id = 'ch-2182'", ())
+                        .await
+                        .unwrap();
+                    let visible: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+                    let n = sent.as_array().map(|a| a.len()).unwrap_or(0);
+                    let batch = {
+                        let mut seen = seen.lock().unwrap();
+                        seen.push((n, visible));
+                        seen.len()
+                    };
+                    let data: Vec<serde_json::Value> = (0..n)
+                        .map(|i| serde_json::json!({ "status": "ok", "id": format!("ticket-{batch}-{i}") }))
+                        .collect();
+                    (StatusCode::OK, Json(serde_json::json!({ "data": data })))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}/"), seen)
+    }
+
+    async fn count(c: &Connection, sql: &str) -> i64 {
+        let mut rows = c.query(sql, ()).await.unwrap();
+        rows.next().await.unwrap().unwrap().get(0).unwrap()
+    }
+
+    /// More recipients than one INSERT holds (83 rows of 6 binds): every one
+    /// gets exactly one distinct handle, and all of them are committed and
+    /// visible to another connection before the FIRST push leaves.
+    #[tokio::test]
+    async fn a_wide_fan_out_writes_every_handle_before_the_first_push() {
+        let n = 200;
+        let (_dir, db) = wide_channel(n).await;
+        let (url, seen) = counting_expo(db.clone()).await;
+        let c = db.conn().await.unwrap();
+        let users: Vec<String> = (0..n).map(|u| format!("u{u}")).collect();
+        fan_out(&c, &url, "ch-2182", &users, "channel", None).await.unwrap();
+
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.iter().map(|(m, _)| m).sum::<usize>(), n, "{seen:?}");
+        assert_eq!(seen[0].1, n as i64, "every handle was visible before the first push");
+        assert_eq!(
+            count(&c, "SELECT COUNT(*) FROM push_handle WHERE conversation_id = 'ch-2182'").await,
+            n as i64
+        );
+        assert_eq!(
+            count(&c, "SELECT COUNT(DISTINCT user_id) FROM push_handle WHERE conversation_id = 'ch-2182'").await,
+            n as i64,
+            "one handle per recipient"
+        );
+        assert_eq!(
+            count(&c, "SELECT COUNT(*) FROM push_ticket").await,
+            n as i64,
+            "every ok ticket recorded, a batch per Expo request"
+        );
+    }
+
+    /// The same recipient named twice gets one handle.
+    #[tokio::test]
+    async fn a_recipient_named_twice_gets_one_handle() {
+        let c = conn().await;
+        let users = vec!["alice".to_string(), "bob".to_string(), "alice".to_string()];
+        let handles = mint_push_handles(&c, &users, "conv-1", "dm").await;
+        assert_eq!(handles.len(), 2);
+        assert_eq!(count(&c, "SELECT COUNT(*) FROM push_handle").await, 2);
+    }
+
+    /// A chunk whose INSERT fails falls back to one row at a time, so every
+    /// user who can get a handle still gets one; the one who cannot gets none
+    /// (no `h`, as before).
+    #[tokio::test]
+    async fn a_failed_handle_batch_falls_back_row_by_row() {
+        let c = conn().await;
+        c.execute_batch(
+            "CREATE TRIGGER refuse_u7 BEFORE INSERT ON push_handle WHEN NEW.user_id = 'u7' \
+             BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        )
+        .await
+        .unwrap();
+        let users: Vec<String> = (0..120).map(|u| format!("u{u}")).collect();
+        let handles = mint_push_handles(&c, &users, "conv-1", "dm").await;
+        assert_eq!(handles.len(), 119, "everyone but u7");
+        assert!(!handles.contains_key("u7"));
+        assert_eq!(count(&c, "SELECT COUNT(*) FROM push_handle").await, 119);
+        let distinct: std::collections::HashSet<&String> = handles.values().collect();
+        assert_eq!(distinct.len(), 119, "distinct handles");
+    }
+
+    /// A ticket batch that cannot be stored costs only the receipt check: the
+    /// fan-out still succeeds and every push still went out.
+    #[tokio::test]
+    async fn a_failed_ticket_batch_does_not_fail_the_fan_out() {
+        let n = 5;
+        let (_dir, db) = wide_channel(n).await;
+        let c = db.conn().await.unwrap();
+        c.execute_batch("DROP TABLE push_ticket;").await.unwrap();
+        let (url, seen) = counting_expo(db.clone()).await;
+        let users: Vec<String> = (0..n).map(|u| format!("u{u}")).collect();
+        fan_out(&c, &url, "ch-2182", &users, "channel", None)
+            .await
+            .expect("the fan-out does not fail on its tickets");
+        assert_eq!(seen.lock().unwrap().iter().map(|(m, _)| m).sum::<usize>(), n);
     }
 }

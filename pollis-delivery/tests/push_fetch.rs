@@ -73,15 +73,10 @@ async fn seed_dm(db: &Db, members: &[&str]) {
         .await
         .unwrap();
     }
+    // Its seq (1) comes from the counter, as for every envelope (#2180).
     conn.execute(
-        "INSERT INTO message_envelope (id, conversation_id, sent_at, sender_id, ciphertext, seq) \
-         VALUES ('env-1', ?1, datetime('now'), 'sealed', 'ct', 1)",
-        libsql::params![DM],
-    )
-    .await
-    .unwrap();
-    conn.execute(
-        "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, 1)",
+        "INSERT INTO message_envelope (id, conversation_id, sent_at, sender_id, ciphertext) \
+         VALUES ('env-1', ?1, datetime('now'), 'sealed', 'ct')",
         libsql::params![DM],
     )
     .await

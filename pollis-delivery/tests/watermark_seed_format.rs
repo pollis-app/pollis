@@ -50,21 +50,15 @@ async fn seed_channel_with_an_envelope_from_earlier_today(conn: &Connection) -> 
     .expect("membership");
 
     let sent_at = rfc3339(earlier_today());
+    // Seq 1 from `conversation_seq`, which the seed reads (#1087, #2180).
     conn.execute(
         "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, sent_at, seq) \
-         VALUES ('m-old', 'c1', 'alice', 'ct', ?1, 1)",
+             (id, conversation_id, sender_id, ciphertext, sent_at) \
+         VALUES ('m-old', 'c1', 'alice', 'ct', ?1)",
         libsql::params![sent_at.clone()],
     )
     .await
     .expect("envelope");
-    // Advance `conversation_seq` as `insert_envelope_with_seq` does (#1087); the seed reads it.
-    conn.execute(
-        "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES ('c1', 1)",
-        (),
-    )
-    .await
-    .expect("sequence counter");
     sent_at
 }
 

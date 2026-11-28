@@ -178,6 +178,11 @@ cfg_hrana! {
     mod hrana;
 }
 
+// POLLIS (#2179): how long a remote database keeps an idle socket pooled.
+cfg_remote! {
+    pub use hrana::hyper::REMOTE_POOL_IDLE_TIMEOUT;
+}
+
 pub use self::{
     auth::{AuthAction, AuthContext, Authorization},
     connection::{AuthHook, BatchRows, Connection, Op},

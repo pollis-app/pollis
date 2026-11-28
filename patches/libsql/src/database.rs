@@ -108,10 +108,12 @@ enum DbType {
     Remote {
         url: String,
         auth_token: String,
-        connector: crate::util::ConnectorService,
         version: Option<String>,
         namespace: Option<String>,
         remote_encryption: Option<EncryptionContext>,
+        /// POLLIS (#2179): the one socket pool every connection shares; it holds
+        /// the connector, which upstream kept here to build a client per connection.
+        http: crate::hrana::hyper::SharedHttpClient,
     },
 }
 
@@ -541,11 +543,12 @@ cfg_remote! {
             let svc = connector
                 .map_err(|e| e.into())
                 .map_response(|s| Box::new(s) as Box<dyn crate::util::Socket>);
+            let connector = crate::util::ConnectorService::new(svc);
             Ok(Database {
                 db_type: DbType::Remote {
                     url: url.into(),
                     auth_token: auth_token.into(),
-                    connector: crate::util::ConnectorService::new(svc),
+                    http: crate::hrana::hyper::SharedHttpClient::new(connector),
                     version,
                     namespace: None,
                     remote_encryption: None
@@ -557,6 +560,16 @@ cfg_remote! {
 }
 
 impl Database {
+    /// POLLIS (#2179): drop every pooled socket of a remote database, so the
+    /// next request on any of its connections opens a new one. A no-op for
+    /// any other kind of database.
+    pub fn reset_remote_http_pool(&self) {
+        #[cfg(feature = "remote")]
+        if let DbType::Remote { http, .. } = &self.db_type {
+            http.reset();
+        }
+    }
+
     /// Connect to the database this can mean a few things depending on how it was constructed:
     ///
     /// - When constructed with `open`/`open_with_flags`/`open_in_memory` this will call into the
@@ -732,16 +745,16 @@ impl Database {
             DbType::Remote {
                 url,
                 auth_token,
-                connector,
                 version,
                 namespace,
                 remote_encryption,
+                http,
             } => {
                 let conn = std::sync::Arc::new(
-                    crate::hrana::connection::HttpConnection::new_with_connector(
+                    crate::hrana::connection::HttpConnection::new_with_shared_client(
                         url,
                         auth_token,
-                        connector.clone(),
+                        http.clone(),
                         version.as_ref().map(|s| s.as_str()),
                         namespace.as_ref().map(|s| s.as_str()),
                         remote_encryption.clone(),

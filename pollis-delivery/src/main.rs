@@ -54,6 +54,11 @@ async fn main() -> Result<()> {
             .await
             .context("connect to Turso")?,
     );
+    // Every envelope's delivery sequence comes from a trigger (#2180): without
+    // it no send could be stored, so refuse to start instead of 5xx-ing them.
+    pollis_delivery::messages::require_seq_triggers(&*db.conn().await?)
+        .await
+        .context("check the main database's schema")?;
 
     // Optional separate commit-log DB; otherwise fall back to the single `db` above.
     let log_url = std::env::var("LOG_DB_URL").ok().filter(|s| !s.is_empty());

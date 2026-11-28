@@ -140,8 +140,8 @@ async fn send(c: &Connection, r2: &FakeR2, who: &str, msg: &str, conv: &str, id:
     .await;
     exec(c, &format!(
         "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, sent_at, seq, sealed, delete_token_hash) \
-         VALUES ('{msg}', '{conv}', 'sealed', 'ct', '2026-01-01', 1, 1, '{}')",
+             (id, conversation_id, sender_id, ciphertext, sent_at, sealed, delete_token_hash) \
+         VALUES ('{msg}', '{conv}', 'sealed', 'ct', '2026-01-01', 1, '{}')",
         capability_hash(&token_of(msg))
     ))
     .await;

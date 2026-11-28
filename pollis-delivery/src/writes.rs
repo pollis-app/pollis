@@ -407,21 +407,41 @@ pub async fn is_member(
     conversation_id: &str,
     user_id: &str,
 ) -> anyhow::Result<bool> {
+    let sql = format!("SELECT {}", member_predicate(":conversation_id", ":user_id"));
     let mut rows = conn
         .query(
-            "SELECT 1 WHERE \
-                EXISTS (SELECT 1 FROM dm_channel_member \
-                        WHERE dm_channel_id = ?1 AND user_id = ?2) \
-             OR EXISTS (SELECT 1 FROM group_member \
-                        WHERE group_id = ?1 AND user_id = ?2) \
-             OR EXISTS (SELECT 1 FROM channels c \
-                        JOIN group_member gm ON gm.group_id = c.group_id \
-                        WHERE c.id = ?1 AND gm.user_id = ?2) \
-             LIMIT 1",
-            libsql::params![conversation_id.to_string(), user_id.to_string()],
+            &sql,
+            libsql::named_params! {
+                ":conversation_id": conversation_id.to_string(),
+                ":user_id": user_id.to_string(),
+            },
         )
         .await?;
-    Ok(rows.next().await?.is_some())
+    let row = rows
+        .next()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("membership predicate returned no row"))?;
+    Ok(row.get::<i64>(0)? != 0)
+}
+
+/// THE membership predicate ([`is_member`]), as a SQL boolean expression over
+/// two SQL expressions: the conversation and the user.
+///
+/// One definition, so the send path's folded read (#2180) and catch-up's
+/// (#2181), which evaluate it inside a larger statement, cannot drift from
+/// [`is_member`]. Each caller passes its OWN key: a send checks the id it
+/// writes to, catch-up the resolved MLS group. Pass named parameters (or
+/// subqueries over them), never positional ones a caller could misnumber.
+pub(crate) fn member_predicate(conversation: &str, user: &str) -> String {
+    format!(
+        "(EXISTS (SELECT 1 FROM dm_channel_member \
+                  WHERE dm_channel_id = {conversation} AND user_id = {user}) \
+          OR EXISTS (SELECT 1 FROM group_member \
+                     WHERE group_id = {conversation} AND user_id = {user}) \
+          OR EXISTS (SELECT 1 FROM channels c \
+                     JOIN group_member gm ON gm.group_id = c.group_id \
+                     WHERE c.id = {conversation} AND gm.user_id = {user}))"
+    )
 }
 
 /// Is `user_id` someone this conversation's MLS tree is SUPPOSED to hold a leaf

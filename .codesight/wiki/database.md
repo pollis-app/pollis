@@ -74,11 +74,21 @@ Source: `pollis-schema/migrations/000000_baseline.sql` + numbered migrations `00
 
 `pollis-delivery/src/db.rs` **pools** libsql connections; `Db::conn()` returns a
 `ConnGuard` (derefs to `libsql::Connection`, parks it again on drop) rather than
-a fresh connection. It has to: for a remote database `Database::connect()` builds
-a whole new `hyper::Client`, and hyper's connection pool lives in the client — so
-one connection per request meant one TCP + TLS handshake per request, which
-multiplies the DS↔Turso distance instead of adding to it (a large part of the
-~1 530 ms/request dev regression in #658).
+a fresh connection. Two things are pooled, at two lifetimes:
+
+- **Sockets (#2179).** Every connection of one remote `Database` sends through
+  that database's ONE hyper client and keep-alive pool (`patches/libsql`), so a
+  TCP + TLS socket outlives any connection on it. Before, upstream libsql built
+  a client per connection, so a socket lived exactly as long as its connection
+  and every request after a 3 s lull paid fresh handshakes to both databases
+  (one connection per request had cost the ~1 530 ms/request dev regression in
+  #658). One pool per database, never per process: main, log and the
+  transparency-log builder never share sockets. An idle socket is let go after
+  `libsql::REMOTE_POOL_IDLE_TIMEOUT` (20 s), under Turso's measured 30.0 s idle
+  close. A streamed `/v3/cursor` answer is read to its end even when the
+  caller stops early (hyper re-pools a socket only then; without it every read
+  dialed a new socket).
+- **Connections**, i.e. hrana streams, under the rules below.
 
 Three rules keep reuse safe, all enforced in `db.rs` rather than by convention:
 
@@ -89,7 +99,7 @@ Three rules keep reuse safe, all enforced in `db.rs` rather than by convention:
   connection would corrupt the former and funnel every DS query through the
   latter.
 - **Parked connections expire.** A `query()` leaves its hrana stream open
-  (describe + cursor never close it) and the server reaps idle streams, so
+  (a `/v3/cursor` never closes it) and the server reaps idle streams, so
   anything parked past `DEFAULT_MAX_IDLE` (3s) is discarded instead of reused.
   That is precisely the sporadic-traffic case where the handshake cost is
   irrelevant anyway. The age runs from the connection's last *use* (#1500): a
@@ -106,6 +116,16 @@ Three rules keep reuse safe, all enforced in `db.rs` rather than by convention:
   Turso, `SQLITE_BUSY`/`LOCKED`) answer **503 `{"error":"unavailable"}`**, not
   500; a database failure during the device-key lookup is the same 503, not a
   401, and still never authenticates.
+- **A socket that saw a fault is never reused (#2179).** libsql drops a
+  database's whole socket pool after a failed exchange or a 5xx answer (a
+  wedged Turso node stays wedged for everything sent to it), and every `Db`
+  drops its own again on the first checkout or statement after any
+  `note_transport_fault`, so the next request dials a new connection, which
+  Turso's load balancer can route to a healthy node. A commit whose answer is
+  lost is still adopted, never forked (`tests/remote_sqld.rs`).
+- **Age counts from the last statement (#2179).** A guard stamps its
+  connection's last use as each statement starts, never at release, so a
+  guard that sat idle while checked out does not park as fresh.
 - **Checkout never blocks.** The pool is elastic (mint on miss, cap the *parked*
   count, never the live count) because handlers nest checkouts — `submit` holds a
   `log_db` connection while taking a `db` one, and in single-DB deploys those are
@@ -145,10 +165,25 @@ and no connector, libsql panics on the first remote query ("you must provide
 your own http connector"). `pollis-libsql-connector/tests/connector.rs` pins the
 contract: verified chain + name, untrusted CA and wrong name refused, `http`
 plain, other schemes refused, and a real libsql remote handle completing the
-handshake through it. libsql itself comes from `patches/libsql` (#1847): the
-crates.io 0.10.0 source with `http2` dropped from its hyper 0.14 features, so no
-h2 crate is linked at all. Delete the patch when a libsql release moves to
-hyper 1.x.
+handshake through it. libsql itself comes from `patches/libsql`: the crates.io
+0.10.0 source with these edits, each listed with its reason and its "when
+deleting" check in the provenance header of `patches/libsql/Cargo.toml`:
+
+- **#1847** — `http2` dropped from its hyper 0.14 features, so no h2 crate is
+  linked at all.
+- **#2178** — a remote statement no longer sends a `describe` before it runs.
+  Upstream's `hrana::Statement::new` awaited a `/v3/pipeline` describe ahead of
+  every query's `/v3/cursor`, so each DS read cost two round trips to Turso;
+  the answer only fed `Statement::columns()`, which nothing calls remotely.
+  Now one SELECT is one `/v3/cursor` (a send dropped from 11+4 to 7+2 Turso
+  round trips, a group catch-up from 12+2 to 6+1). `execute()` never
+  described. Pinned by `pollis-delivery/tests/remote_round_trips.rs`, which
+  counts the requests a remote read makes against the hrana double, so a
+  libsql upgrade that brings the describe back fails a test instead of
+  silently doubling every read.
+
+Blast radius of a change here: the DS, `verifiable-log-builder` (`db-source`),
+`verifiable-log-serve`, and `src-tauri`'s dev-only `test-harness`.
 
 ### users
 - `id` TEXT PK
@@ -462,34 +497,64 @@ client with a wrong clock now produces a wrong timestamp in a bubble rather than
 an undeliverable message.
 
 **Why the sequence is not `MAX(seq)+1`.** The counter lives in its own table,
-`conversation_seq(conversation_id, next_seq)`, taken with a single `INSERT … ON
-CONFLICT DO UPDATE … RETURNING`. Deriving it from `message_envelope` is wrong in
-a way that is easy to miss and produces silent message loss: envelope GC
-**deletes rows**, so once every member device has read past everything the
-conversation is emptied, `MAX(seq)` goes NULL, and the next envelope is assigned
-`1` again — at or below every device's cursor, so `seq > last_seq` never selects
-it and it reaches nobody. That is the #692 shape reappearing inside the design
-meant to retire it. GC never touches `conversation_seq`; only teardown removes a
-row, at which point the cursors pointing into it go too. Pinned by
-`delivery_sequence_tests::a_sequence_is_never_reused_after_gc_empties_the_conversation`,
-which fails against the naive implementation. Every envelope — send, edit,
-tombstone — is written through one chokepoint, `messages::insert_envelope_with_seq`.
+`conversation_seq(conversation_id, next_seq)` (`next_seq` holds the last value
+handed out). Deriving it from `message_envelope` is wrong in a way that is easy
+to miss and produces silent message loss: envelope GC **deletes rows**, so once
+every member device has read past everything the conversation is emptied,
+`MAX(seq)` goes NULL, and the next envelope is assigned `1` again — at or below
+every device's cursor, so `seq > last_seq` never selects it and it reaches
+nobody. That is the #692 shape reappearing inside the design meant to retire
+it. GC never touches `conversation_seq`; only teardown removes a row, at which
+point the cursors pointing into it go too.
 
-**Why that chokepoint takes a `Transaction`, not a `Connection`.** Allocating the
-sequence and inserting the row are two statements. If another writer can slip
-between them it takes `N+1` and publishes *that* row while `N` is still missing;
-a recipient fetching `seq > last_seq` in that window sees `N+1`, advances its
-cursor onto it, and envelope `N` lands below every cursor — delivered to nobody,
-then collected. That would be a fourth acceptable loss, which the delivery
-contract does not have room for. Under SQLite/libsql a transaction whose first
-statement is a write holds the write lock until commit, so writers serialise and
-the gap is never observable; taking the transaction *in the signature* is what
-stops a later caller from re-opening the window with a bare autocommit
-connection. A rolled-back insert un-does the counter bump with it, so there is
-not even a burned sequence. Pinned by
-`delivery_sequence_tests::an_in_flight_send_never_exposes_a_sequence_without_its_envelope`,
-which reads from a second connection mid-send and fails if either half is
-visible alone.
+**The database assigns it (#2180, migration `000058`).** Two triggers on
+`message_envelope` hold the invariant at the lowest layer:
+
+- `message_envelope_assign_seq` (AFTER INSERT, row inserted without a seq)
+  bumps the conversation's counter and stamps the row, inside the inserting
+  statement. A SQLite statement is atomic, so allocation and insert commit or
+  roll back together: no envelope exists without its seq, no reader ever sees
+  the counter ahead of its row, and a failed insert burns nothing.
+- `message_envelope_seq_from_counter` (BEFORE INSERT, row naming a seq)
+  refuses any seq but the counter's current value, so a writer that bypassed
+  the counter (`MAX(seq)+1`, a copied seq) fails loudly. The DS deployed before
+  000058 bumps the counter and inserts exactly that value in one transaction,
+  so it still passes: old and new DS can write one database during a rolling
+  deploy or a rollback. A test fixture that needs a specific seq bumps the
+  counter to it first, the same way.
+
+Every envelope — send, edit, tombstone — goes through one chokepoint,
+`messages::insert_envelope`, which names no seq (source-shape guard:
+`envelope_insert_site_tests`). A **send is one autocommit statement**, so
+Turso's database-wide write lock is held for one statement instead of across
+the four or five round trips of the old BEGIN / bump / INSERT / COMMIT (which
+capped total send capacity at ~18 sends/s at 10 ms RTT); an edit or tombstone
+runs it inside its own transaction. The chokepoint **fails closed**: the INSERT
+is conditioned on both triggers existing (`sqlite_schema`) and must store
+exactly one row, so on a database the migration never reached a send stores
+nothing and errors (the client keeps it and retries) instead of acknowledging
+an envelope with no seq; the DS also refuses to start without them
+(`messages::require_seq_triggers`). The migration must be applied before the
+DS that relies on it is deployed (the deploy workflows migrate first).
+
+Pinned by `tests/envelope_seq.rs` (local) and `remote_sqld.rs::delivery_sequence_invariants_hold_over_hrana`
+(a real sqld): next value, N concurrent same-conversation sends dense and
+unique, the counter outliving GC, teardown restarting at 1, a failed insert
+burning nothing, explicit seqs refused unless equal to the counter, multi-row
+inserts consecutive, no trigger means no envelope and no startup, and old-DS
+and new-DS writers interleaving on one database.
+
+**One read before a send (#2180).** `send_envelope_once` reads the replay row
+(the envelope already under `body.id`), what `body.conversation_id` resolves to
+(the epoch gate's MLS group) and the member check in ONE statement
+(`send_probe`), built from the shared definitions `writes::member_predicate`
+(which `is_member` itself runs) and `directory::RESOLVE_COLUMNS` (which
+`resolve_conversation` runs), bound by name. It then evaluates them in the order
+they always ran: replay, the head, the actor and membership, the body. So a
+non-member at a stale epoch still gets `EpochBehind`, and an existing id still
+reveals nothing (`epoch_gate_tests::the_folded_send_checks_keep_their_order`).
+The `EnvelopeIdLock`, both head reads and the delete-on-`EpochBehind` are
+unchanged. A send is now 2 main + 2 log round trips (was 11 + 4).
 
 **What the sequence retired**, all of it the cost of ordering by a lexically
 compared string that two different clocks wrote:
@@ -952,27 +1017,45 @@ A counter bumped (`directory::bump_membership_version`) whenever an account or d
 
 **The two columns are in different text formats, deliberately (#908).** A text timestamp's format is decided by one thing: what it is compared against. `last_fetched_at` is compared lexically against `message_envelope.sent_at`, so it is **RFC 3339** — clients write it through `pollis_core::commands::messages::envelope_sent_at`, and the DS's own server-side seeds write it through `pollis_delivery::messages::seeded_watermark_cursor`; `check_cursor_stamp` refuses any other shape at the endpoint. `reported_at` is compared against `datetime('now', ?)` in the `CLEANUP_*` predicate, so it stays in **SQLite's `YYYY-MM-DD HH:MM:SS`**. Until #908 the three seed paths (device registration, DM create / DM member-add, group join) wrote `datetime('now')` into *both*; because a space (0x20) sorts below a `T` (0x54), a seeded cursor compared as older than every RFC 3339 stamp sharing its calendar day — the opposite of the "this device has already consumed the backlog" the seed exists to assert. Fail-safe (over-pin, under-collect — envelopes were kept, never lost), but the seed did not do what its comment claimed. `seeded_watermark_cursor` is the DS-side counterpart to `envelope_sent_at`: one function owns the format so five call sites cannot each get it wrong.
 
-**Read as a BOUND value, never correlated (#1049).** `fetch_envelopes` in
+**Read as a NON-correlated value, inlined (#1049, #2181).** `fetch_envelopes` in
 `pollis-delivery/src/directory.rs` serves every conversation in one query, so
-each needs its own cursor — but the cursor must also be something the planner
-can use as an index range on `idx_envelope_channel_time(conversation_id,
-sent_at DESC, id)`. Expressing it as a subquery correlated on
-`message_envelope.conversation_id` reads correctly and **silently loses the
-range**: the comparison value is not known until the outer row exists, so SQLite
-plans `SEARCH (conversation_id=?)` plus a `CORRELATED SCALAR SUBQUERY` and reads
-every retained envelope in the conversation before discarding it. Measured at
-200k envelopes for a caught-up device returning zero rows: **36 ms / ~200k billed
-rows, versus 0.1 ms / none** for the bound form. The watermarks are therefore
-fetched first (`fetch_watermarks`, one indexed read) and bound per conversation
-as `(conversation_id = ? AND sent_at > ?) OR …`, which plans `MULTI-INDEX OR`
-with a real range seek per branch. Splitting the read is safe in the only
-direction that matters: a `(conversation, user, device)` watermark is advanced by
-that device alone, so a concurrent advance between the two reads can only leave
-an OLDER cursor in play — re-sending an envelope the client already has, which
-ingest's `INSERT OR IGNORE INTO message` absorbs. It can never skip one.
-`pollis-delivery/tests/envelope_query_plan.rs` asserts the plan, because this
-regressed once already: #875 batched the per-channel fetches into one and turned
-a bound `?1` into a correlation, which no correctness test could see.
+each needs its own cursor — and the cursor must be something the planner can
+use as an index range on `idx_envelope_conv_seq(conversation_id, seq)`.
+Expressing it as a subquery correlated on `message_envelope.conversation_id`
+reads correctly and **silently loses the range**: the comparison value is not
+known until the outer row exists, so SQLite plans `SEARCH (conversation_id=?)`
+plus a `CORRELATED SCALAR SUBQUERY` and reads every retained envelope in the
+conversation before discarding it (measured at 200k envelopes for a caught-up
+device returning zero rows: 36 ms / ~200k billed rows, versus 0.1 ms / none).
+Until #2181 the watermarks were therefore fetched in a read of their own and
+bound per conversation. Now each is inlined as a subquery over BOUND parameters
+only, `(conversation_id = ?k AND seq > COALESCE((SELECT last_seq FROM
+conversation_watermark WHERE conversation_id = ?k AND user_id = ?1 AND
+device_id = ?2), 0))`, which SQLite evaluates once as a constant: the plan is
+still `MULTI-INDEX OR` with a real `(conversation_id=? AND seq>?)` seek per
+branch, one round trip fewer, and the watermark and the envelopes are one
+snapshot. The **outer** `COALESCE(.., 0)` is load-bearing: it maps both a
+missing row (a new device, a channel it never fetched) and a NULL `last_seq`
+to 0 (fetch everything); a `SELECT COALESCE(last_seq, 0)` inside would leave a
+missing row NULL, `seq > NULL` would match nothing, and that device would
+never be delivered to. `pollis-delivery/tests/envelope_query_plan.rs` EXPLAINs
+the SQL the production builder emits (`directory::envelope_fetch_sql`, not a
+copy), because this regressed once already: #875 batched the per-channel
+fetches into one and turned a bound `?1` into a correlation, which no
+correctness test could see.
+
+**Catch-up is three round trips, in order (#2181).** `catch_up_answer` (behind
+`/v1/conversations/catch-up` and `/v1/push/fetch`): (1) one main-DB statement
+of scalar subqueries — the resolve (`RESOLVE_COLUMNS`, precedence channel →
+DM → group), the membership predicate on the RESOLVED group
+(`writes::member_predicate`, the one `is_member` runs), the group's channel
+list and its membership version; authorization is decided here and a
+non-member gets nothing else of it; (2) the log-DB head, alone, before (3) the
+envelope read (#1041: the client bounds its replay to that head). The DM's
+channel and the roster stay their own flag-gated reads. Byte-for-byte equal to
+the old sequence of reads for every shape (`directory::catch_up_fold_tests`,
+which keeps the old code verbatim to compare against). A group catch-up went
+from 6 + 1 to 2 + 1 Turso round trips.
 
 Used by the envelope cleanup sweep — the `CLEANUP_CHANNEL_ENVELOPES` / `CLEANUP_DM_ENVELOPES` DELETEs in `pollis-delivery/src/messages.rs` — to decide when it is safe to drop a row from `message_envelope`. The **trigger** is server-side (#689): the DS runs `sweep_envelope_gc` on a fixed cadence (`POLLIS_DS_GC_SWEEP_SECS`, default 3600s) over every conversation with envelopes, so GC no longer rides a member's ingest path and a conversation whose members all go quiet is still collected. The per-conversation `apply_envelope_gc` (the `/v1/envelopes/gc` endpoint) runs the same watermark-gated cleanup on demand; both share the one cleanup chokepoint. That endpoint has **no client caller and is not meant to have one** — it is operator tooling, classified `Audience::Operator` in `pollis-api`'s endpoint table (so `ds_post` will not accept it) and documented in `docs/ds-operator-endpoints.md` (#925). A row is deleted **only** when every **non-revoked, live** device of every current member has watermarked past `sent_at`. Retention is bounded by the slowest member device **and by device liveness** — invariant **I3** in `docs/backend-core-invariants.md`.
 
@@ -986,10 +1069,11 @@ Every branch of the remaining gate fails closed: a member device that has never 
 
 That mirroring is **enforced, not merely documented** (#722). "Which member devices count toward retention" has three implementations that had to agree by hand — the two `CLEANUP_*` DELETEs and `commit::current_member_devices` — and a divergence is an I5 violation surfacing as dropped mail (roster too narrow) or retention that never clears (roster too wide). The roster half of each DELETE now lives in the `channel_member_device_rows!` / `dm_member_device_rows!` macros in `messages.rs`, `concat!`-ed back into the statement (the executed SQL is byte-identical, pinned by a test). `messages::roster_parity_tests` SELECTs the *same* join chain the DELETE aggregates over and asserts it resolves the identical device list as the Rust function, over a fixture covering plain members, mixed live/revoked devices, all-revoked members, non-members, member devices with no watermark row, and both conversation shapes.
 
-Seed paths (so a new device or a pre-join user doesn't block cleanup retroactively). All three skip revoked devices (`revoked_at IS NULL`, #685) — a revoked device is not part of the GC roster, so seeding it a row would just re-introduce the wedge:
-- group member-add (`pollis-delivery` `groups.rs::add_member_rows`) seeds one row per (channel, device) for the joining user at join time.
-- DM create / DM member-add (`pollis-delivery` `profile.rs`) seed per (member, device).
-- **cert publish** (`pollis-delivery` `bootstrap.rs::seed_conversation_watermarks`, called from `apply_publish_device_cert`) seeds per conversation the user is already a member of, for the newly enrolled device. It used to run at `register_device`, one step earlier — but a device that has only registered has proved nothing beyond holding an OTP session: a sibling still has to approve it, and it may never publish a cert at all. Seeding there let such a never-enrolled ghost pin every conversation's envelopes for the whole #720 staleness window (#1092). Cert publish is the pivot where the device becomes real, so that is where it starts pinning.
+Seed paths (so a new device or a pre-join user doesn't block cleanup retroactively). A seed at the counter says "nothing before now is yours", which is true at exactly two moments, the first two accepted losses: a user joining a conversation, and a device's first enrollment. **A seed anywhere else would put a device's cursor past mail it never fetched**, so every seed runs inside the transaction of the event that justifies it, and every one is `INSERT OR IGNORE` (an existing row, wherever it points, is never moved). All of them skip revoked devices (`revoked_at IS NULL`, #685) — a revoked device is not part of the GC roster, so seeding it a row would just re-introduce the wedge:
+- group member-add (`pollis-delivery` `groups.rs::add_member_rows`) seeds one row per (channel, device) for the joining user at join time, in the join's transaction; a join whose seed fails does not commit (it used to be best-effort).
+- **channel create** (`groups.rs::seed_new_channel_watermarks`, in `apply_create_channel`'s transaction) seeds every live, certified device of every member at the channel's start, 0: each of them is owed everything the channel will hold. The row reads exactly as a missing one did (fetch everything), but it exists, so no later seed can place that device's cursor anywhere else, and the device pins the channel's retention under the #720 bound from the start (a missing row pinned it forever).
+- DM create / DM member-add (`pollis-delivery` `profile.rs`) seed per (member, device), in their transactions.
+- **cert publish** (`pollis-delivery` `bootstrap.rs::seed_conversation_watermarks`, called from `apply_publish_device_cert`) seeds per conversation the user is already a member of, for a **newly enrolled** device only: the statement itself requires the device's `mls_signature_pub` to still be NULL, in the same transaction as the UPDATE that sets it. It used to run at `register_device`, one step earlier — but a device that has only registered has proved nothing beyond holding an OTP session: a sibling still has to approve it, and it may never publish a cert at all. Seeding there let such a never-enrolled ghost pin every conversation's envelopes for the whole #720 staleness window (#1092). Cert publish is the pivot where the device becomes real, so that is where it starts pinning. It also used to run on EVERY publish, and a device publishes again on every unlock: a channel created and written to while a member's device was locked had no row for it yet, so the unlock seeded one at the head, and the device never received that channel's earlier messages. Pinned by `tests/watermark_seeding.rs` and the flows test `lost_messages::a_channel_written_while_a_member_was_locked_reaches_them_after_unlock`.
 
 Teardown: `POST /v1/devices/revoke` (`account.rs::apply_revoke_device`) DELETEs the revoked device's watermark rows in the same transaction as the tombstone, scoped `WHERE user_id = actor AND device_id = ?` (#685). The read-time filters above already make the prune floor correct, so this is the "invalid states unrepresentable" half: a cursor that can never advance stops existing rather than relying on every future reader remembering to exclude it. Note `POST /v1/auth/logout` DELETEs the `user_device` row outright, and the watermark join hangs off `user_device`, so a logged-out device's leftover rows are already invisible to the gate.
 

@@ -1,7 +1,11 @@
-//! The envelope fetch must use `sent_at` as an index RANGE, not read the
-//! conversation and filter.
+//! The envelope fetch must use `seq` as an index RANGE per conversation, not
+//! read each conversation and filter (#875), with each device's watermark a
+//! NON-correlated subquery (#2181).
 //!
-//! `SEARCH … (conversation_id=? AND sent_at>?)` is the fix; a correlated subquery is the defect (#875).
+//! The plan is taken of the SQL the production code sends
+//! (`directory::envelope_fetch_sql`), not of a copy of it.
+
+use pollis_delivery::directory::envelope_fetch_sql;
 
 mod common;
 
@@ -27,47 +31,49 @@ async fn plan(db: &common::TempDb, sql: &str) -> String {
     out.join(" | ")
 }
 
-const FIXED: &str = "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, \
-     target_message_id, sent_at, type \
-     FROM message_envelope \
-     WHERE (conversation_id = ?1 AND sent_at > ?2) OR (conversation_id = ?3 AND sent_at > ?4) \
-     ORDER BY conversation_id ASC, sent_at ASC, id ASC";
-
-/// The pre-#1049 form, the negative control.
-const CORRELATED: &str = "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, \
-     target_message_id, sent_at, type \
-     FROM message_envelope \
-     WHERE conversation_id IN (?3, ?4) \
-       AND sent_at > COALESCE((SELECT last_fetched_at FROM conversation_watermark \
-            WHERE conversation_id = message_envelope.conversation_id \
-              AND user_id = ?1 AND device_id = ?2), '') \
-     ORDER BY conversation_id ASC, sent_at ASC, id ASC";
-
+/// One conversation, two, and a full chunk (`BIND_CHUNK / 2`).
 #[tokio::test]
-async fn the_envelope_fetch_bounds_sent_at_with_the_index() {
+async fn the_envelope_fetch_seeks_each_conversation_by_seq() {
     let db = db().await;
-    let p = plan(&db, FIXED).await;
-
-    assert!(
-        p.contains("sent_at>?"),
-        "the envelope fetch no longer uses sent_at as an index range — it is \
-         reading the conversation's whole retained history and filtering. That \
-         is billed rows on every 'anything new?' from every client. Plan was:\n  {p}"
-    );
-    assert!(
-        !p.contains("CORRELATED"),
-        "the watermark is correlated again; bind each conversation's own \
-         watermark instead (see fetch_watermarks). Plan was:\n  {p}"
-    );
+    for conversations in [1, 2, pollis_delivery::util::BIND_CHUNK / 2] {
+        let p = plan(&db, &envelope_fetch_sql(conversations)).await;
+        let seeks = p
+            .matches("USING INDEX idx_envelope_conv_seq (conversation_id=? AND seq>?)")
+            .count();
+        assert_eq!(
+            seeks, conversations,
+            "every conversation must be an index range on (conversation_id, seq) — \
+             otherwise each 'anything new?' reads the conversation's whole retained \
+             history. Plan for {conversations}:\n  {p}"
+        );
+        assert!(
+            !p.contains("CORRELATED"),
+            "a watermark is correlated again; it must be a subquery over bound \
+             parameters only. Plan for {conversations}:\n  {p}"
+        );
+        assert!(
+            !p.contains("SCAN message_envelope"),
+            "the envelope table is scanned. Plan for {conversations}:\n  {p}"
+        );
+    }
 }
 
+/// The pre-#1049 form, the negative control: a watermark correlated with the
+/// outer row cannot bound the range, so the guard above can tell the two apart.
 #[tokio::test]
 async fn the_correlated_form_is_still_measurably_worse() {
     let db = db().await;
-    let correlated = plan(&db, CORRELATED).await;
-
+    let correlated = plan(
+        &db,
+        "SELECT id FROM message_envelope \
+         WHERE conversation_id IN (?3, ?4) \
+           AND seq > COALESCE((SELECT last_seq FROM conversation_watermark \
+                WHERE conversation_id = message_envelope.conversation_id \
+                  AND user_id = ?1 AND device_id = ?2), 0)",
+    )
+    .await;
     assert!(
-        correlated.contains("CORRELATED") && !correlated.contains("sent_at>?"),
+        correlated.contains("CORRELATED") && !correlated.contains("seq>?"),
         "the correlated form now plans as well as the bound one — this guard's \
          premise no longer holds and it needs rewriting. Plan was:\n  {correlated}"
     );

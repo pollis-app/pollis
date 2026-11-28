@@ -825,7 +825,8 @@ cfg_remote! {
                 db_type: DbType::Remote {
                     url,
                     auth_token,
-                    connector,
+                    // POLLIS (#2179): one socket pool per Database.
+                    http: crate::hrana::hyper::SharedHttpClient::new(connector),
                     version,
                     namespace,
                     remote_encryption
