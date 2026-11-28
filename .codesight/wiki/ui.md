@@ -464,6 +464,17 @@ Concretely, in the message log:
   the cache clears on `languageChanged` and on window focus (a formatter keeps the time
   zone it was built in).
 
+### The pre-app backdrop holds still (#2169)
+
+`DotMatrix`, behind every pre-app screen (`BackdropScreen`: lock, sign-in, PIN,
+enrollment) and the crash screen, animates for `ANIMATE_FOR_MS` (2.5 s) after mount
+and then holds its last frame; under `prefers-reduced-motion: reduce` it paints one
+still frame and never animates. Every animated frame is a full-window software repaint
+on Linux (compositing is off), so the endless loop kept a core busy for as long as the
+app sat locked (WebKitGTK throttles `requestAnimationFrame` only for hidden windows,
+not covered or unfocused ones). While held it repaints once on a resize or an accent
+change. `e2e/backdrop-idle.spec.ts` counts its frames through the render probe.
+
 ### Voice stage and controls
 
 The voice UI is `components/Voice/stage/VoiceStage.tsx` (the channel/call screen),
