@@ -19,17 +19,12 @@ import { useTranslation } from "react-i18next";
 import { Screen, Header, IconButton, EmptyState } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
-import {
-  GROUP_WINDOW_MS,
-  dayKey,
-  dayLabel,
-  timeLabel,
-} from "../../components/chat/dates";
+import { dayKey, dayLabel, timeLabel } from "../../components/chat/dates";
 import { DaySeparator } from "../../components/chat/DaySeparator";
 import { UndecryptableRow } from "../../components/chat/UndecryptableRow";
 import { KeyChangeNoticeRow } from "../../components/chat/KeyChangeNoticeRow";
-import { collapseUndecryptable } from "../../lib/collapseUndecryptable";
-import { placeKeyChangeNotices } from "../../lib/keyChangeTimeline";
+import { buildChatItems, type ChatListItem } from "../../lib/chatItems";
+import { messageRowProps, type RowView } from "../../components/chat/messageRowProps";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   MessageRowItem,
@@ -142,6 +137,21 @@ import {
 const HOLD_POSITION = { minIndexForVisible: 0 } as const;
 const RISE_INVERTED = messageRiseIn(true);
 const REVEALED = { opacity: 1 };
+// The list's own props, hoisted (#2168): with `strictMode` they let a keystroke's screen render
+// skip the FlatList and every cell. The opacity holds the list back until its pills are known.
+const LIST_SHOWN = { flex: 1, opacity: 1 } as const;
+const LIST_HIDDEN = { flex: 1, opacity: 0 } as const;
+// `flex-end` is the visual TOP under `inverted`: anchors a short thread there.
+const LIST_CONTENT = {
+  paddingTop: 4,
+  paddingBottom: 12,
+  flexGrow: 1,
+  justifyContent: "flex-end",
+} as const;
+const DAY_LABELS = { dayKey, dayLabel };
+function chatItemKey(item: ChatListItem): string {
+  return item.key;
+}
 
 // Props embed this screen in the iPad right pane; route usage passes none.
 type ChatViewProps = {
@@ -151,11 +161,6 @@ type ChatViewProps = {
   name?: string;
   embedded?: boolean;
 };
-
-type ChatListItem =
-  | { type: "sep"; key: string; label: string }
-  | { type: "msg"; key: string; message: Message; continued: boolean }
-  | { type: "keyChange"; key: string; notice: KeyChangeNotice; at: number };
 
 function TextChat(props: ChatViewProps = {}) {
   const { themeKey } = useTheme();
@@ -646,66 +651,11 @@ function TextChat(props: ChatViewProps = {}) {
     botMentions,
   } = useMessageBodyContext(kind, conversationId, groupId ?? null);
 
-  // Inverted-list items, newest first. Thread replies stay out of the main timeline (#837).
-  const items = useMemo(() => {
-    const chrono = collapseUndecryptable(
-      [...messages].reverse().filter((m) => !m.thread_id || m.thread_id === m.id),
-    );
-    const out: ChatListItem[] = [];
-    let lastKey = "";
-    let prev: Message | null = null;
-    // Safety-number changes (#1605) at the time they were detected; a system line breaks a group.
-    const placed = placeKeyChangeNotices(
-      keyChangeNotices ?? [],
-      chrono.length ? chrono[0].created_at : null,
-      chrono.length ? chrono[chrono.length - 1].created_at : null,
-      !!hasNextPage,
-      false,
-    );
-    let next = 0;
-    const emitNotice = (n: (typeof placed)[number]) => {
-      const k = dayKey(n.at);
-      if (k !== lastKey) {
-        out.push({ type: "sep", key: `sep-${k}`, label: dayLabel(n.at) });
-        lastKey = k;
-      }
-      out.push({
-        type: "keyChange",
-        key: `key-change-${n.notice.id}`,
-        notice: n.notice,
-        at: n.at,
-      });
-      prev = null;
-    };
-    for (const m of chrono) {
-      while (next < placed.length && placed[next].at < m.created_at) {
-        emitNotice(placed[next]);
-        next += 1;
-      }
-      const k = dayKey(m.created_at);
-      if (k !== lastKey) {
-        out.push({ type: "sep", key: `sep-${k}`, label: dayLabel(m.created_at) });
-        lastKey = k;
-        prev = null;
-      }
-      // Discord-style grouping; a reply always starts its own group.
-      const continued =
-        prev !== null &&
-        !m.reply_to_id &&
-        prev.sender_id === m.sender_id &&
-        m.created_at - prev.created_at < GROUP_WINDOW_MS;
-      // Keyed by the core's id (#2141): a stub and the stored row it becomes are one element,
-      // so the row neither remounts nor re-measures when its send settles.
-      out.push({ type: "msg", key: m.outboxId ?? m.id, message: m, continued });
-      prev = m;
-    }
-    while (next < placed.length) {
-      emitNotice(placed[next]);
-      next += 1;
-    }
-    out.reverse();
-    return out;
-  }, [messages, keyChangeNotices, hasNextPage]);
+  // Inverted-list items, newest first; an unchanged row keeps its item (lib/chatItems.ts).
+  const items = useMemo(
+    () => buildChatItems(messages, keyChangeNotices ?? [], !!hasNextPage, DAY_LABELS),
+    [messages, keyChangeNotices, hasNextPage],
+  );
 
   const repliedTo = useMemo(() => replyTargets(messages), [messages]);
 
@@ -1097,6 +1047,40 @@ function TextChat(props: ChatViewProps = {}) {
     [],
   );
 
+  // What `renderItem` reads, in one object; it moves only when one of these does, never per
+  // keystroke (the draft is in none of them).
+  const rowView = useMemo<RowView>(
+    () => ({
+      ctx: rowCtx,
+      handlers: rowHandlers,
+      reactionsByMessage,
+      receiptsByMessage,
+      receiptMessageId,
+      threadSummaries,
+      repliedTo,
+      highlightId,
+      railPeer,
+      readUpToMessageId,
+      readUpToLabel: (name) => t("chat:receipts.readUpTo", { name }),
+      entering: (id) => (rising.has(id) && !risen.current.has(id) ? riseIn : undefined),
+    }),
+    [
+      rowCtx,
+      rowHandlers,
+      reactionsByMessage,
+      receiptsByMessage,
+      receiptMessageId,
+      threadSummaries,
+      repliedTo,
+      highlightId,
+      railPeer,
+      readUpToMessageId,
+      t,
+      rising,
+      riseIn,
+    ],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: ChatListItem }) => {
       if (item.type === "sep") {
@@ -1132,43 +1116,21 @@ function TextChat(props: ChatViewProps = {}) {
           />
         );
       }
-      const readUpTo = !!railPeer && m.id === readUpToMessageId;
-      return (
-        <MessageRowItem
-          message={m}
-          railPeer={railPeer}
-          readUpTo={readUpTo}
-          readUpToLabel={readUpTo && railPeer ? t("chat:receipts.readUpTo", { name: railPeer.name }) : null}
-          continued={item.continued}
-          ctx={rowCtx}
-          handlers={rowHandlers}
-          reactions={reactionsByMessage?.get(m.id)}
-          receipt={m.id === receiptMessageId ? receiptsByMessage?.get(m.id) : undefined}
-          threadCount={threadSummaries?.get(m.id)?.reply_count ?? 0}
-          threadLastReplyAt={threadSummaries?.get(m.id)?.last_reply_at}
-          original={m.reply_to_id ? repliedTo.get(m.reply_to_id) : undefined}
-          highlighted={highlightId === m.id}
-          entering={rising.has(m.id) && !risen.current.has(m.id) ? riseIn : undefined}
-        />
-      );
+      // Per-row props only (components/chat/messageRowProps.ts): each row takes its own slice.
+      return <MessageRowItem {...messageRowProps(m, item.continued, rowView)} />;
     },
-    [
-      rising,
-      riseIn,
-      router,
-      reactionsByMessage,
-      receiptsByMessage,
-      receiptMessageId,
-      railPeer,
-      readUpToMessageId,
-      t,
-      threadSummaries,
-      repliedTo,
-      highlightId,
-      peerLabel,
-      rowCtx,
-      rowHandlers,
-    ],
+    [router, peerLabel, rowView],
+  );
+  // `ty.meta` is a new snapshot on a theme change, so the footer follows `themeKey`.
+  const listFooter = useMemo(
+    () =>
+      isFetchingNextPage ? (
+        <Text style={[ty.meta, { paddingHorizontal: 16, paddingVertical: 10 }]}>
+          {t("chat.loadingOlder")}
+        </Text>
+      ) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isFetchingNextPage, t, themeKey],
   );
 
   const content = (
@@ -1301,18 +1263,15 @@ function TextChat(props: ChatViewProps = {}) {
         // so a long press did nothing until it was dismissed (#1859). Rows dismiss it themselves.
         keyboardShouldPersistTaps="handled"
         data={items}
-        keyExtractor={(item) => item.key}
+        keyExtractor={chatItemKey}
         renderItem={renderItem}
+        // Memoises the list's cell renderer on renderItem (#2168): without it every list render
+        // hands each cell a new renderer, so every cell re-renders.
+        strictMode
         CellRendererComponent={railPeer ? ReadRailCell : undefined}
         extraData={themeKey}
-        style={{ flex: 1, opacity: listRevealed ? 1 : 0 }}
-        // `flex-end` is the visual TOP under `inverted`: anchors a short thread there.
-        contentContainerStyle={{
-          paddingTop: 4,
-          paddingBottom: 12,
-          flexGrow: 1,
-          justifyContent: "flex-end",
-        }}
+        style={listRevealed ? LIST_SHOWN : LIST_HIDDEN}
+        contentContainerStyle={LIST_CONTENT}
         // With `inverted`, the "end" is the visual top (the oldest loaded message).
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
@@ -1321,15 +1280,7 @@ function TextChat(props: ChatViewProps = {}) {
         maintainVisibleContentPosition={atBottom ? undefined : HOLD_POSITION}
         onScrollToIndexFailed={onScrollToIndexFailed}
         viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs}
-        ListFooterComponent={
-          isFetchingNextPage ? (
-            <Text
-              style={[ty.meta, { paddingHorizontal: 16, paddingVertical: 10 }]}
-            >
-              {t("chat.loadingOlder")}
-            </Text>
-          ) : null
-        }
+        ListFooterComponent={listFooter}
       />
       </ReadRailProvider>
       {unseen > 0 && !atBottom ? <NewMessagesButton count={unseen} onPress={goToNewest} /> : null}

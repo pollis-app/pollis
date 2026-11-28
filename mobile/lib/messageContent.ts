@@ -121,7 +121,9 @@ function attachmentFromWire(a: AttachmentWire, i: number, origin: ContentOrigin)
     filename: a.name,
     content_type: a.ct,
     file_size: a.size,
-    uploaded_at: Date.now(),
+    // Not known for a received reference. A constant, so a re-read row deep-equals its cached
+    // self and keeps its identity (#2168); a per-read clock value re-rendered every such row.
+    uploaded_at: 0,
     blurhash: a.bh,
     width: a.w,
     height: a.h,
@@ -172,7 +174,8 @@ export function optimisticLinkPreview(
           filename: "",
           content_type: "image/jpeg",
           file_size: 0,
-          uploaded_at: Date.now(),
+          // As a received reference's: nothing reads it, and a constant keeps the stub equal.
+          uploaded_at: 0,
           width: draft.image.width,
           height: draft.image.height,
           localPreviewUri: draft.image.dataUrl,

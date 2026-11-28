@@ -168,12 +168,13 @@ locale there and refreshing is the whole procedure::
 That mode is the ONLY one that touches the network (stdlib ``urllib``, pinned
 to ``CLDR_RELEASE``); a plain run stays offline and deterministic. Both modes
 then emit one ``annotations/<lang>.ts`` per locale plus an ``index.ts`` whose
-loader dynamically imports them, under both ``frontend/src/components/Emoji/``
-and ``mobile/components/emoji/``. Each table is ~90-190 KB and the picker only
-ever needs the active locale's and English's, which on the web bundle is a
-separate chunk per locale (#874's code-splitting rule); Metro does not split,
-so on mobile every locale ships in the binary and the dynamic import only
-defers parsing until the picker opens.
+loader dynamically imports them, under ``frontend/src/components/Emoji/``. Each
+table is ~90-340 KB and the picker only ever needs the active locale's and
+English's, which on the web bundle is a separate chunk per locale (#874's
+code-splitting rule). Metro does not split, so under ``mobile/components/emoji/``
+only English is a module and every other locale is ``annotations/<lang>.emojitable``
+(the same rows as JSON), a content-addressed asset its ``index.ts`` reads through
+``emojiTableAsset.ts`` when the picker first needs it (#2188).
 
 Known limits
 ------------
@@ -223,13 +224,20 @@ EMOJI_TEST_URL = f"https://unicode.org/Public/emoji/{EMOJI_TEST_VERSION}/emoji-t
 ANNOTATIONS_PATH = REPO_ROOT / "scripts" / "emoji-annotations.json"
 
 # One generated module per locale plus the loader index, per app. Both
-# directories are owned by this script: stale locale modules are removed on
-# every run. Mobile gets the same modules because its picker is localized
-# through the same shared catalogues (#1074).
-ANNOTATIONS_DIRS = (
-    REPO_ROOT / "frontend" / "src" / "components" / "Emoji" / "annotations",
-    REPO_ROOT / "mobile" / "components" / "emoji" / "annotations",
-)
+# directories are owned by this script: stale locale files are removed on
+# every run. Mobile gets the same tables because its picker is localized
+# through the same shared catalogues (#1074), but in another shape (#2188):
+# Metro does not split, so a module per locale still puts every table in the
+# Hermes bundle, and every OTA re-sends them. On mobile only English (the
+# instant fallback) is a module; every other locale is `<lang>.emojitable`, a
+# JSON file Metro ships as a content-addressed asset (`assetExts` in
+# mobile/metro.config.js), read when the picker first needs it.
+DESKTOP_ANNOTATIONS_DIR = REPO_ROOT / "frontend" / "src" / "components" / "Emoji" / "annotations"
+MOBILE_ANNOTATIONS_DIR = REPO_ROOT / "mobile" / "components" / "emoji" / "annotations"
+ANNOTATIONS_DIRS = (DESKTOP_ANNOTATIONS_DIR, MOBILE_ANNOTATIONS_DIR)
+# The locale both apps keep in the bundle, so localized search never waits on it.
+BUNDLED_ANNOTATION_LOCALE = "en"
+MOBILE_TABLE_EXTENSION = "emojitable"
 
 # The locale registry. `--refresh-annotations` reads its `code: "xx"` entries
 # so the annotation set can never drift from the languages the app ships.
@@ -738,6 +746,67 @@ def render_annotation_index(langs: list[str], release: str) -> str:
     return "\n".join(lines)
 
 
+def render_mobile_annotation_index(langs: list[str], release: str) -> str:
+    lines = annotation_header(release)
+    lines.append("// English is a module in the bundle: the instant fallback. Every other locale is a")
+    lines.append("// content-addressed asset, `<locale>.emojitable` (JSON rows), read when the picker")
+    lines.append("// first needs it (#2188): Metro does not split, so a module per locale put every")
+    lines.append("// table in the Hermes bundle and every OTA re-sent them all. A read that fails or")
+    lines.append("// stalls rejects (`readEmojiTable` bounds it), which leaves English results only.")
+    lines.append("")
+    lines.append('import { readEmojiTable } from "../emojiTableAsset.ts";')
+    lines.append("")
+    lines.append("/** `[char, localized name, `|`-joined lowercase keywords]`. */")
+    lines.append("export type EmojiAnnotationRow = readonly [")
+    lines.append("  char: string,")
+    lines.append("  name: string,")
+    lines.append("  keywords: string,")
+    lines.append("];")
+    lines.append("")
+    lines.append("export const EMOJI_ANNOTATION_LOCALES: readonly string[] = [")
+    for lang in langs:
+        lines.append(f"  {ts_string(lang)},")
+    lines.append("];")
+    lines.append("")
+    lines.append("/** The rows for `locale`, or null when no table ships for it. Never throws. */")
+    lines.append("export function loadEmojiAnnotationRows(")
+    lines.append("  locale: string,")
+    lines.append("): Promise<readonly EmojiAnnotationRow[]> | null {")
+    lines.append("  switch (locale) {")
+    for lang in langs:
+        lines.append(f"    case {ts_string(lang)}:")
+        if lang == BUNDLED_ANNOTATION_LOCALE:
+            lines.append(f'      return import("./{lang}").then((m) => m.default);')
+        else:
+            lines.append(f'      return readEmojiTable(() => require("./{lang}.{MOBILE_TABLE_EXTENSION}"));')
+    lines.append("    default:")
+    lines.append("      return null;")
+    lines.append("  }")
+    lines.append("}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_annotation_table(table: dict[str, list[str]], chars: dict[str, str]) -> str:
+    """One locale's rows as JSON, one row per line (diffable), the same rows as the module."""
+    rows = []
+    for key, values in table.items():
+        name, keywords = values[0], values[1:]
+        rows.append(json.dumps([chars[key], name, "|".join(keywords)], ensure_ascii=False))
+    return "[\n" + ",\n".join(rows) + "\n]\n"
+
+
+def write_generated(out_dir: Path, files: dict[str, str], owned: tuple[str, ...]) -> None:
+    """Write ``files`` into ``out_dir`` and drop any other file with an owned suffix."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name, rendered in files.items():
+        (out_dir / name).write_text(rendered, encoding="utf-8")
+    for suffix in owned:
+        for stale in out_dir.glob(f"*{suffix}"):
+            if stale.name not in files:
+                stale.unlink()
+
+
 def write_annotations(entries: list[dict[str, object]]) -> dict[str, int]:
     """Emit every locale module and the index; drop modules for gone locales."""
     locales, release = load_annotations()
@@ -747,19 +816,19 @@ def write_annotations(entries: list[dict[str, object]]) -> dict[str, int]:
     langs = sorted(locales)
     counts: dict[str, int] = {}
     modules: dict[str, str] = {"index.ts": render_annotation_index(langs, release)}
+    mobile: dict[str, str] = {"index.ts": render_mobile_annotation_index(langs, release)}
     for lang in langs:
         # A key the table no longer carries (a narrowed range) is dropped here
         # rather than shipped as an orphan row.
         table = {key: values for key, values in locales[lang].items() if key in known}
         counts[lang] = len(table)
         modules[f"{lang}.ts"] = render_annotation_module(lang, table, known, release)
-    for out_dir in ANNOTATIONS_DIRS:
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for name, rendered in modules.items():
-            (out_dir / name).write_text(rendered, encoding="utf-8")
-        for stale in out_dir.glob("*.ts"):
-            if stale.name not in modules:
-                stale.unlink()
+        if lang == BUNDLED_ANNOTATION_LOCALE:
+            mobile[f"{lang}.ts"] = modules[f"{lang}.ts"]
+        else:
+            mobile[f"{lang}.{MOBILE_TABLE_EXTENSION}"] = render_annotation_table(table, known)
+    write_generated(DESKTOP_ANNOTATIONS_DIR, modules, (".ts",))
+    write_generated(MOBILE_ANNOTATIONS_DIR, mobile, (".ts", f".{MOBILE_TABLE_EXTENSION}"))
     return counts
 
 

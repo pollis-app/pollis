@@ -2,6 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { STANDARD_EMOJI } from "../components/emoji/emojiData.ts";
 import {
@@ -11,12 +12,19 @@ import {
 } from "../components/emoji/emojiAnnotations.ts";
 import { rankEmoji, type PickerEmoji } from "../components/emoji/emojiRank.ts";
 import { EMOJI_ANNOTATION_LOCALES } from "../components/emoji/annotations/index.ts";
+import { parseEmojiTable } from "../components/emoji/emojiTableAsset.ts";
 import { supportedLanguageCodes } from "../i18n/languages.ts";
 import type { CustomEmoji } from "../hooks/queries/useEmoji.ts";
 
+// English is a bundled module; every other locale is a `.emojitable` asset (#2188), read here
+// from disk with the same parser the app's asset reader uses.
 async function loadLocale(locale: string): Promise<EmojiAnnotations> {
-  const module = await import(`../components/emoji/annotations/${locale}.ts`);
-  return buildEmojiAnnotations(module.default);
+  if (locale === "en") {
+    const module = await import(`../components/emoji/annotations/${locale}.ts`);
+    return buildEmojiAnnotations(module.default);
+  }
+  const text = readFileSync(new URL(`../components/emoji/annotations/${locale}.emojitable`, import.meta.url), "utf8");
+  return buildEmojiAnnotations(parseEmojiTable(text));
 }
 
 const [en, uk, es, fr] = await Promise.all(["en", "uk", "es", "fr"].map(loadLocale));

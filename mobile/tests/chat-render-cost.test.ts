@@ -29,13 +29,16 @@ test("rows are memoised and take stable handlers, never per-render closures", ()
 test("a row still re-renders when its own data changes", () => {
   // The per-row props are the message, its reactions entry and its receipt, so a changed
   // message, a toggled reaction (a new array for that id only) or a new receipt reach it.
-  for (const prop of ["message={m}", "reactions={reactionsByMessage?.get(m.id)}", "receipt={"]) {
-    assert.ok(renderItem.includes(prop), `renderItem passes ${prop}`);
+  // They are built by messageRowProps (#2168; tests/chat-row-identity.test.ts counts the renders).
+  assert.ok(renderItem.includes("{...messageRowProps(m, item.continued, rowView)}"));
+  const props = src("components/chat/messageRowProps.ts");
+  for (const prop of ["message: m,", "reactions: v.reactionsByMessage?.get(m.id),", "receipt: m.id === v.receiptMessageId"]) {
+    assert.ok(props.includes(prop), `messageRowProps passes ${prop}`);
   }
 });
 
 test("a stub and its stored row share one key", () => {
-  assert.match(chat, /key: m\.outboxId \?\? m\.id/);
+  assert.match(src("lib/chatItems.ts"), /key: m\.outboxId \?\? m\.id/);
 });
 
 test("the thread's rows keep their callbacks across keystrokes", () => {

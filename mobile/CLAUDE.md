@@ -28,8 +28,8 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - `expo-camera`, `expo-secure-store`, `expo-notifications`
 - `expo-image` (caching, and the blurhash placeholders — there is no separate blurhash package)
 - `@livekit/react-native-webrtc` pinned to `144.1.2` + `@livekit/react-native-expo-plugin` `^1.0.3` (installed for #343, not wired — see "Voice")
-- `lucide-react-native` icons, wrapped in `components/icons.tsx` (stable `Icon.*` API, strokeWidth pinned to 1.75 — `ICON_STROKE`). `react-native-svg` is still used directly for the Initializing dot-field.
-- Geist (UI, the desktop Modern skin's face) via `@expo-google-fonts/geist`, one family name per weight (`fonts.regular/medium/semibold/bold`; never pair with `fontWeight`). Monospace (crypto material, e.g. the enrollment approval code) uses the **system** mono face — `fonts.mono*` = `Platform.select({ ios: 'Menlo', android: 'monospace' })`, no bundled font.
+- `lucide-react-native` icons, wrapped in `components/icons.tsx` (stable `Icon.*` API, strokeWidth pinned to 1.75 — `ICON_STROKE`), one deep import per icon (`lucide-react-native/icons/<file>`), never the barrel, which bundles and builds all ~1,800 (#2187; `tests/lucide-deep-imports.test.ts`, `scripts/lucide-deep-imports.mjs` rewrites one). `react-native-svg` is still used directly for the Initializing dot-field.
+- Geist (UI, the desktop Modern skin's face) via `@expo-google-fonts/geist`, imported per weight (`@expo-google-fonts/geist/400Regular`, …; the package index requires all 18 TTFs, #2188), one family name per weight (`fonts.regular/medium/semibold/bold`; never pair with `fontWeight`). Monospace (crypto material, e.g. the enrollment approval code) uses the **system** mono face — `fonts.mono*` = `Platform.select({ ios: 'Menlo', android: 'monospace' })`, no bundled font.
 - Rust core via `pollis-native` Turbo Module (uniffi-bindgen-react-native)
 
 ## Tests
@@ -61,9 +61,13 @@ tier for that.
 ## Localization (i18n, #1074)
 
 `i18next` + `react-i18next`, the same stack and the **same catalogues** as
-desktop — `mobile/i18n/resources.ts` is a generated static table of every
-`frontend/src/i18n/locales/<lng>/<ns>.json`, which Metro can resolve because
-`metro.config.js` adds that one directory to `watchFolders`. A key is
+desktop — `mobile/i18n/resources.ts` is a generated table of one loader per
+language over `frontend/src/i18n/locales/<lng>/<ns>.json`, which Metro can resolve
+because `metro.config.js` adds that one directory to `watchFolders`. Only English
+and the active language are built at launch (#2187); every language change goes
+through `switchLanguage` in `i18n/load.ts`, which adds the bundle before
+`changeLanguage` — never call `i18n.changeLanguage` directly
+(`tests/i18n-lazy.test.ts`). A key is
 addressed exactly as on desktop (`t("settings:language.heading")`, or
 `t("language.heading")` under `useTranslation("settings")`); copy that exists
 only on mobile lives in the `mobile` namespace, in the same directory, so
@@ -114,7 +118,10 @@ Rules that are easy to get wrong here:
   that encode direction (`back`, `fwd`, the arrows).
 - **Emoji search is localized** through the CLDR annotations the generator
   emits under `components/emoji/annotations/` (#901); `useEmojiAnnotations`
-  loads the active locale's table and English's.
+  loads the active locale's table and English's. Only English is a module; every
+  other table is a `<lang>.emojitable` asset (`assetExts` in `metro.config.js`, never
+  `json`), read by `components/emoji/emojiTableAsset.ts`, so the Hermes bundle and
+  each OTA carry none of them (#2188). A failed read leaves English.
 
 Adding a locale: follow the desktop README, then add the same row to
 `mobile/i18n/languages.ts` and run `node scripts/mobile-i18n-resources.mjs`.
@@ -143,6 +150,19 @@ The bridge is a local RN turbo-module that links our `pollis-core` Rust crate in
 - `cargo-ndk` compiles `pollis-core` for `arm64-v8a`, `armeabi-v7a`, `x86_64` as `.a` (static)
 - `uniffi-bindgen-react-native` generates TS bindings (`src/generated/`), C++ JSI glue (`cpp/`), and CMake setup (`android/CMakeLists.txt`)
 - CMake statically links the Rust `.a` into a turbo-module `.so`
+- **The `.so` exports only its JNI entry points (#2189).** `android/exports.map` is the
+  linker version script (`global: JNI_OnLoad; Java_*; local: *;`), passed from
+  `android/build.gradle` (`noOverwrite`) as `CMAKE_SHARED_LINKER_FLAGS`, never from the
+  generated `CMakeLists.txt`, which ubrn rewrites. Everything else is local, so
+  `--gc-sections` drops what nothing reaches (x86_64 `.so` 38.7 MB → 17.4 MB) and the loader
+  resolves a handful of symbols, not ~74,000. **A new JNI entry point must be named
+  `Java_…` (`extern "C"` + `JNIEXPORT`) or be added to the map**, and to
+  `pollisRequiredExports` in `build.gradle`, whose `verifyPollisNativeExports` step runs
+  `llvm-readelf --dyn-syms` after every `buildCMake<Config>[<abi>]` link and fails the
+  build if `JNI_OnLoad` or one of the five `Java_com_pollisnative_*` symbols is missing, or
+  if more than 16 symbols are exported. Never `-Wl,--exclude-libs` on `libpollis_core.a`: it
+  hides the Rust `JNI_OnLoad`, so `android_kek` never gets the JavaVM and PIN unlock fails.
+  The NDK link already passes `--no-undefined-version`. Native, so store build only.
 
 ### Dev loop — Rust changes
 

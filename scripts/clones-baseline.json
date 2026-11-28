@@ -33,7 +33,7 @@
       ]
     },
     "mobile": {
-      "count": 34,
+      "count": 32,
       "fingerprints": {
         "111a756f0f17b876": 1,
         "1271fa85728ae15d": 1,
@@ -54,11 +54,9 @@
         "8e57699673125d38": 1,
         "90c4bb3a4cf9c6c7": 1,
         "960a66d93c4f7f11": 1,
-        "a43dd575f8b8b4e4": 1,
         "a86d355dcb8ec05a": 1,
         "ab12253d26ec4725": 1,
         "af95178c7e184682": 1,
-        "b28bbb015811e480": 1,
         "b7b7e8760d844512": 1,
         "bb903479a1b52d67": 1,
         "c6bc55755c101eda": 1,
@@ -72,9 +70,9 @@
       },
       "clones": [
         "mobile/app/(tabs)/self.tsx:314-323 ≡ mobile/app/self/security.tsx:406-415",
-        "mobile/app/chat/[id].tsx:1342-1351 ≡ mobile/app/vault.tsx:370-379",
-        "mobile/app/chat/[id].tsx:532-554 ≡ mobile/app/vault.tsx:135-154",
-        "mobile/app/chat/thread.tsx:188-195 ≡ mobile/components/chat/MessageRowItem.tsx:113-120",
+        "mobile/app/chat/[id].tsx:1334-1343 ≡ mobile/app/vault.tsx:370-379",
+        "mobile/app/chat/[id].tsx:547-569 ≡ mobile/app/vault.tsx:135-154",
+        "mobile/app/chat/thread.tsx:188-195 ≡ mobile/components/chat/MessageRowItem.tsx:124-131",
         "mobile/app/dm/safety.tsx:32-44 ≡ mobile/app/user/[id].tsx:66-78",
         "mobile/app/group/invite-links.tsx:21-31 ≡ mobile/app/group/requests.tsx:18-26",
         "mobile/app/self/change-email.tsx:103-113 ≡ mobile/app/self/preferences.tsx:197-206",
@@ -95,8 +93,6 @@
         "mobile/hooks/queries/useGroupInvites.ts:296-306 ≡ mobile/hooks/queries/useGroupInvites.ts:737-747",
         "mobile/hooks/queries/useGroupInvites.ts:340-354 ≡ mobile/hooks/queries/useGroupInvites.ts:366-380",
         "mobile/hooks/queries/useGroupInvites.ts:340-354 ≡ mobile/hooks/queries/useUserGroups.ts:209-223",
-        "mobile/hooks/queries/useMessages.ts:740-746 ≡ mobile/hooks/queries/useMessages.ts:797-803",
-        "mobile/hooks/queries/useMessages.ts:756-769 ≡ mobile/hooks/queries/useMessages.ts:809-821",
         "mobile/hooks/queries/useUserGroups.ts:135-144 ≡ mobile/hooks/queries/useUserGroups.ts:191-198",
         "mobile/hooks/useEnrollmentApprovals.ts:18-24 ≡ mobile/hooks/useHistoryTransferService.ts:25-31",
         "mobile/hooks/useEnrollmentApprovals.ts:3-9 ≡ mobile/hooks/useHistoryTransferService.ts:4-10",

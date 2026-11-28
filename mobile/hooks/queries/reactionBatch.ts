@@ -1,5 +1,6 @@
 // One conversation's reaction map, read in ONE `get_reactions_for_messages` call per batch (#2115). Pure.
 
+import { replaceEqualDeep } from "@tanstack/react-query";
 import type { Reaction } from "./useReactions";
 
 /** The native bridge's `invoke`, injected so these rules run under node --test. */
@@ -62,14 +63,20 @@ export function mayReveal(
   return messageIds.length === 0 || timedOut || missingIds(map, messageIds).length === 0;
 }
 
-/** `previous` with `fresh`'s entries laid over it; entries `fresh` did not read are kept. */
+/**
+ * `previous` with `fresh`'s entries laid over it; entries `fresh` did not read are kept. An entry
+ * that reads back equal keeps its old array (#2168): a row takes its own entry as a prop, so a
+ * re-read of the whole conversation renders only the rows whose reactions changed. A changed
+ * entry is always a new array (`replaceEqualDeep` shares only what is deep-equal).
+ */
 export function mergeReactions(
   previous: ReadonlyMap<string, Reaction[]> | undefined,
   fresh: ReadonlyMap<string, Reaction[]>,
 ): ReactionMap {
   const next: ReactionMap = new Map(previous ?? []);
   for (const [id, reactions] of fresh) {
-    next.set(id, reactions);
+    const before = previous?.get(id);
+    next.set(id, before ? replaceEqualDeep(before, reactions) : reactions);
   }
   return next;
 }
