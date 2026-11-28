@@ -21,9 +21,7 @@ tags:
     id: "tab-direct"
 - extendedWaitUntil:
     visible:
-      id: "unread-.*"
-      containsChild:
-        text: "3"
+      text: ".*, 3 unread, .*"
     timeout: 60000
 - takeScreenshot: unread-03-after-cold-start
 - tapOn:
