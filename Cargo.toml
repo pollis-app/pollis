@@ -153,7 +153,8 @@ device-info = { path = "patches/device-info" }
 # crates.io libsql 0.10.0 with a few edits: `http2` removed from its hyper
 # 0.14 features (#1847; every remote handle speaks HTTP/1.1 to Turso through
 # pollis-libsql-connector anyway, #1303) and no describe round trip before a
-# remote query (#2178). patches/libsql/Cargo.toml lists every edit, the
+# remote query (#2178), one socket pool per database (#2179).
+# patches/libsql/Cargo.toml lists every edit, the
 # provenance check, and what to check before deleting the patch.
 libsql = { path = "patches/libsql" }
 # #1989: crates.io cpal 0.18.2 plus the unreleased upstream fix for PulseAudio

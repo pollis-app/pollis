@@ -22,9 +22,85 @@ use super::StmtResultRows;
 
 pub type ByteStream = Box<dyn Stream<Item = std::io::Result<Bytes>> + Send + Sync + Unpin>;
 
+/// POLLIS (#2179): how long an idle keep-alive socket to Turso stays pooled.
+///
+/// Turso's edge closes an idle HTTP/1.1 connection at exactly 30.0 s (measured,
+/// 3 of 3 connections; it sends no `Keep-Alive` header and offers no h2), so
+/// the pool lets go well before that, or a request could race the server's
+/// close. hyper retries a request that never reached the wire on a socket the
+/// server had already closed (`retry_canceled_requests`, left at its default).
+pub const REMOTE_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(20);
+
+type HyperClient = hyper::Client<ConnectorService, hyper::Body>;
+
+/// POLLIS (#2179): ONE hyper client, and so one keep-alive socket pool, per
+/// remote `Database`.
+///
+/// Upstream builds a client per `HttpSender`, i.e. per `Connection`, so a
+/// socket lived exactly as long as its connection, and a caller that drops
+/// connections whose hrana stream may have expired (the DS pool does after 3 s)
+/// also threw away a warm TCP + TLS socket. Shared, the socket outlives the
+/// stream; stream (baton) lifetime is untouched.
+///
+/// A socket that carried a transport failure or a 5xx answer must not carry
+/// another request: a wedged Turso node stays wedged for everything sent to it.
+/// So a failure swaps in a fresh client with an empty pool ([`Self::reset`]),
+/// and the next request dials a new connection, which Turso's load balancer can
+/// route to a healthy node. `HttpSender::send` does that itself on every such
+/// failure; `Database::reset_remote_http_pool` does it for anything else a
+/// caller counts as a fault.
+#[derive(Clone)]
+pub struct SharedHttpClient {
+    current: Arc<std::sync::RwLock<(u64, HyperClient)>>,
+    connector: ConnectorService,
+}
+
+impl std::fmt::Debug for SharedHttpClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedHttpClient").finish_non_exhaustive()
+    }
+}
+
+impl SharedHttpClient {
+    pub(crate) fn new(connector: ConnectorService) -> Self {
+        let client = Self::build(connector.clone());
+        Self {
+            current: Arc::new(std::sync::RwLock::new((0, client))),
+            connector,
+        }
+    }
+
+    fn build(connector: ConnectorService) -> HyperClient {
+        hyper::Client::builder()
+            .pool_idle_timeout(REMOTE_POOL_IDLE_TIMEOUT)
+            .build(connector)
+    }
+
+    /// The client to send on now, and its generation.
+    fn current(&self) -> (u64, HyperClient) {
+        let current = self.current.read().unwrap_or_else(|e| e.into_inner());
+        (current.0, current.1.clone())
+    }
+
+    /// Drop every pooled socket: the next request opens a new connection.
+    pub fn reset(&self) {
+        let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
+        let next = current.0 + 1;
+        *current = (next, Self::build(self.connector.clone()));
+    }
+
+    /// [`Self::reset`], unless the pool was already replaced since `generation`.
+    fn reset_after(&self, generation: u64) {
+        let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
+        if current.0 == generation {
+            *current = (generation + 1, Self::build(self.connector.clone()));
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct HttpSender {
-    inner: hyper::Client<ConnectorService, hyper::Body>,
+    inner: SharedHttpClient,
     version: HeaderValue,
     namespace: Option<HeaderValue>,
     #[cfg(any(feature = "remote", feature = "sync"))]
@@ -40,12 +116,29 @@ impl HttpSender {
             crate::database::EncryptionContext,
         >,
     ) -> Self {
+        Self::with_client(
+            SharedHttpClient::new(connector),
+            version,
+            namespace,
+            #[cfg(any(feature = "remote", feature = "sync"))]
+            remote_encryption,
+        )
+    }
+
+    /// POLLIS (#2179): a sender on a `Database`'s shared client.
+    pub(crate) fn with_client(
+        inner: SharedHttpClient,
+        version: Option<&str>,
+        namespace: Option<&str>,
+        #[cfg(any(feature = "remote", feature = "sync"))] remote_encryption: Option<
+            crate::database::EncryptionContext,
+        >,
+    ) -> Self {
         let ver = version.unwrap_or(env!("CARGO_PKG_VERSION"));
 
         let version = HeaderValue::try_from(format!("libsql-remote-{ver}")).unwrap();
         let namespace = namespace.map(|v| HeaderValue::try_from(v).unwrap());
 
-        let inner = hyper::Client::builder().build(connector);
         Self {
             inner,
             version,
@@ -79,9 +172,21 @@ impl HttpSender {
             .body(hyper::Body::from(body))
             .map_err(|err| HranaError::Http(format!("{:?}", err)))?;
 
-        let resp = self.inner.request(req).await.map_err(HranaError::from)?;
+        // POLLIS (#2179): a socket that failed, or that a 5xx came back on, is
+        // never used again (see `SharedHttpClient`).
+        let (generation, client) = self.inner.current();
+        let resp = match client.request(req).await {
+            Ok(resp) => resp,
+            Err(err) => {
+                self.inner.reset_after(generation);
+                return Err(HranaError::from(err));
+            }
+        };
 
         let status = resp.status();
+        if status.is_server_error() {
+            self.inner.reset_after(generation);
+        }
         if status != StatusCode::OK {
             let body = hyper::body::to_bytes(resp.into_body())
                 .await
@@ -100,10 +205,78 @@ impl HttpSender {
                 .into_body()
                 .into_stream()
                 .map_err(|e| std::io::Error::new(ErrorKind::Other, e));
-            super::HttpBody::Stream(Box::new(stream))
+            super::HttpBody::Stream(Box::new(DrainOnDrop::new(Box::new(stream))))
         };
 
         Ok(body)
+    }
+}
+
+/// POLLIS (#2179): the most a dropped response body is read on to free its socket.
+const DRAIN_LIMIT_BYTES: usize = 1 << 20;
+/// POLLIS (#2179): the longest a dropped response body is read on to free its socket.
+const DRAIN_LIMIT: Duration = Duration::from_secs(5);
+
+/// POLLIS (#2179): a streamed response body (a `/v3/cursor`) that is read to
+/// its end even when its reader stops early.
+///
+/// hyper only puts a socket back in the keep-alive pool once the response on
+/// it has been read to the end. A cursor's reader stops at its step's end, or
+/// earlier (`rows.next()` once, then drop), so the body was never finished and
+/// every remote read threw its TCP + TLS socket away, shared pool or not. On
+/// drop, the unread rest is read in the background and discarded, bounded by
+/// [`DRAIN_LIMIT_BYTES`] and [`DRAIN_LIMIT`]; past either the socket is simply
+/// closed, as before. Nothing the caller sees changes.
+struct DrainOnDrop {
+    inner: Option<ByteStream>,
+}
+
+impl DrainOnDrop {
+    fn new(inner: ByteStream) -> Self {
+        Self { inner: Some(inner) }
+    }
+}
+
+impl Stream for DrainOnDrop {
+    type Item = std::io::Result<Bytes>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let Some(inner) = self.inner.as_mut() else {
+            return std::task::Poll::Ready(None);
+        };
+        let polled = std::pin::Pin::new(inner).poll_next(cx);
+        if matches!(polled, std::task::Poll::Ready(None)) {
+            // Finished: nothing left to drain.
+            self.inner = None;
+        }
+        polled
+    }
+}
+
+impl Drop for DrainOnDrop {
+    fn drop(&mut self) {
+        let Some(mut rest) = self.inner.take() else {
+            return;
+        };
+        let Ok(rt) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        rt.spawn(async move {
+            use futures::StreamExt;
+            let _ = tokio::time::timeout(DRAIN_LIMIT, async move {
+                let mut read = 0usize;
+                while let Some(Ok(chunk)) = rest.next().await {
+                    read += chunk.len();
+                    if read > DRAIN_LIMIT_BYTES {
+                        break;
+                    }
+                }
+            })
+            .await;
+        });
     }
 }
 
@@ -132,6 +305,27 @@ impl From<hyper::Error> for HranaError {
 }
 
 impl HttpConnection<HttpSender> {
+    /// POLLIS (#2179): a connection on its `Database`'s shared client.
+    pub(crate) fn new_with_shared_client(
+        url: impl Into<String>,
+        token: impl Into<String>,
+        client: SharedHttpClient,
+        version: Option<&str>,
+        namespace: Option<&str>,
+        #[cfg(any(feature = "remote", feature = "sync"))] remote_encryption: Option<
+            crate::database::EncryptionContext,
+        >,
+    ) -> Self {
+        let inner = HttpSender::with_client(
+            client,
+            version,
+            namespace,
+            #[cfg(any(feature = "remote", feature = "sync"))]
+            remote_encryption,
+        );
+        Self::new(url.into(), token.into(), inner)
+    }
+
     pub(crate) fn new_with_connector(
         url: impl Into<String>,
         token: impl Into<String>,

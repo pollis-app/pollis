@@ -74,11 +74,21 @@ Source: `pollis-schema/migrations/000000_baseline.sql` + numbered migrations `00
 
 `pollis-delivery/src/db.rs` **pools** libsql connections; `Db::conn()` returns a
 `ConnGuard` (derefs to `libsql::Connection`, parks it again on drop) rather than
-a fresh connection. It has to: for a remote database `Database::connect()` builds
-a whole new `hyper::Client`, and hyper's connection pool lives in the client — so
-one connection per request meant one TCP + TLS handshake per request, which
-multiplies the DS↔Turso distance instead of adding to it (a large part of the
-~1 530 ms/request dev regression in #658).
+a fresh connection. Two things are pooled, at two lifetimes:
+
+- **Sockets (#2179).** Every connection of one remote `Database` sends through
+  that database's ONE hyper client and keep-alive pool (`patches/libsql`), so a
+  TCP + TLS socket outlives any connection on it. Before, upstream libsql built
+  a client per connection, so a socket lived exactly as long as its connection
+  and every request after a 3 s lull paid fresh handshakes to both databases
+  (one connection per request had cost the ~1 530 ms/request dev regression in
+  #658). One pool per database, never per process: main, log and the
+  transparency-log builder never share sockets. An idle socket is let go after
+  `libsql::REMOTE_POOL_IDLE_TIMEOUT` (20 s), under Turso's measured 30.0 s idle
+  close. A streamed `/v3/cursor` answer is read to its end even when the
+  caller stops early (hyper re-pools a socket only then; without it every read
+  dialed a new socket).
+- **Connections**, i.e. hrana streams, under the rules below.
 
 Three rules keep reuse safe, all enforced in `db.rs` rather than by convention:
 
@@ -106,6 +116,16 @@ Three rules keep reuse safe, all enforced in `db.rs` rather than by convention:
   Turso, `SQLITE_BUSY`/`LOCKED`) answer **503 `{"error":"unavailable"}`**, not
   500; a database failure during the device-key lookup is the same 503, not a
   401, and still never authenticates.
+- **A socket that saw a fault is never reused (#2179).** libsql drops a
+  database's whole socket pool after a failed exchange or a 5xx answer (a
+  wedged Turso node stays wedged for everything sent to it), and every `Db`
+  drops its own again on the first checkout or statement after any
+  `note_transport_fault`, so the next request dials a new connection, which
+  Turso's load balancer can route to a healthy node. A commit whose answer is
+  lost is still adopted, never forked (`tests/remote_sqld.rs`).
+- **Age counts from the last statement (#2179).** A guard stamps its
+  connection's last use as each statement starts, never at release, so a
+  guard that sat idle while checked out does not park as fresh.
 - **Checkout never blocks.** The pool is elastic (mint on miss, cap the *parked*
   count, never the live count) because handlers nest checkouts — `submit` holds a
   `log_db` connection while taking a `db` one, and in single-DB deploys those are

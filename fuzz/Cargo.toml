@@ -36,6 +36,10 @@ openmls_traits = { git = "https://github.com/openmls/openmls", rev = "34222ef632
 openmls_rust_crypto = { path = "../patches/openmls-rust-crypto" }
 openmls_basic_credential = { path = "../patches/openmls-basic-credential" }
 openmls_memory_storage = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
+# Mirrors the root's libsql patch (#1847, #2178, #2179): `pollis-delivery`,
+# which the DS targets fuzz, calls API only the patched copy has, and the
+# fuzzed DS must be the one that ships.
+libsql = { path = "../patches/libsql" }
 
 # Mirrors the root too: without it openmls's unused `openmls_sqlite_storage`
 # pins rusqlite 0.37 and cannot resolve beside pollis-core's 0.43 (#1797).

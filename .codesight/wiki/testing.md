@@ -407,6 +407,30 @@ the same problem without the leak. `pollis-delivery/tests/fixtures.rs` asserts t
 directory really is removed on drop, so a regression to leaking fails a test rather
 than quietly filling the disk.
 
+## `pollis-delivery` over the remote hrana path (#2178, #2179)
+
+`TempDb` is local libsql, which never reaches the hrana client code the DS runs
+against Turso (`patches/libsql`'s `hrana/`). Two kinds of test cover that path:
+
+- **Against the hrana double** (`tests/support/hrana_double.rs`, in CI):
+  `conn_pool.rs`, `conn_pool_faults.rs`, `remote_round_trips.rs`. The double
+  logs every request with the client socket it came on, streams its
+  `/v3/cursor` answers like sqld, and can fail the next request with a status,
+  so they count round trips (one read = one `/v3/cursor`), streams (did a
+  request carry a baton) and sockets (`connections()`, `Served::peer`).
+- **Against a real sqld** (`tests/remote_sqld.rs`, `#[ignore]`, not in CI):
+  main and log on separate servers as in production, each behind a TCP proxy
+  (`tests/support/sqld.rs`) that counts requests and sockets and can cut a
+  connection after a request was applied but before its answer arrives. Run
+  before merging any change to `patches/libsql`, the DS's SQL, or the schema:
+
+  ```bash
+  POLLIS_SQLD=~/.turso/sqld cargo test -p pollis-delivery --test remote_sqld -- --ignored --test-threads=1
+  ```
+
+  (`POLLIS_SQLD` defaults to `~/.turso/sqld`; any sqld 0.24.) Unlike Turso, sqld
+  enforces foreign keys, so a fixture there must insert parents first.
+
 ## Contract tests that fail at COMPILE time
 
 Three of this repo's invariants are checked by code that must *fail to build*

@@ -17,7 +17,7 @@
 #![allow(dead_code)]
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -114,6 +114,8 @@ pub struct Proxy {
     /// server has answered it and before the answer reaches the client.
     cut_after: Arc<Mutex<Option<String>>>,
     cut: Arc<AtomicBool>,
+    /// Client TCP connections accepted so far.
+    sockets: Arc<AtomicUsize>,
 }
 
 impl Proxy {
@@ -127,10 +129,12 @@ impl Proxy {
             log: Arc::default(),
             cut_after: Arc::default(),
             cut: Arc::default(),
+            sockets: Arc::default(),
         };
         let proxy = me.clone();
         tokio::spawn(async move {
             while let Ok((client, _)) = listener.accept().await {
+                proxy.sockets.fetch_add(1, Ordering::SeqCst);
                 let proxy = proxy.clone();
                 tokio::spawn(async move { proxy.relay(client, upstream_port).await });
             }
@@ -240,6 +244,11 @@ impl Proxy {
     pub fn cut_after_request_containing(&self, needle: &str) {
         *self.cut_after.lock().unwrap() = Some(needle.to_string());
         self.cut.store(false, Ordering::SeqCst);
+    }
+
+    /// Client TCP connections accepted so far.
+    pub fn sockets(&self) -> usize {
+        self.sockets.load(Ordering::SeqCst)
     }
 
     /// Whether the armed cut has happened.

@@ -38,6 +38,7 @@ async fn a_connection_whose_stream_died_under_a_read_is_not_parked_again() {
     assert_eq!(served.len(), 1, "{served:?}");
     assert_eq!(served[0].path, "/v3/cursor", "the read failed on its cursor: {served:?}");
     assert!(served[0].had_baton, "{served:?}");
+    let faulted_socket = served[0].peer;
     let err = anyhow::Error::from(err);
     assert!(
         format!("{err:#}").contains("stream not found"),
@@ -59,6 +60,10 @@ async fn a_connection_whose_stream_died_under_a_read_is_not_parked_again() {
     assert!(
         !served[0].had_baton,
         "the connection with the dead stream must be dropped, not reused: {served:?}"
+    );
+    assert_ne!(
+        served[0].peer, faulted_socket,
+        "after a fault the next request goes out on a new socket too (#2179)"
     );
 }
 
@@ -100,6 +105,7 @@ async fn a_connection_released_before_a_fault_is_still_reused() {
 
     let conn = db.conn().await.expect("checkout");
     conn.query("SELECT 1", ()).await.expect("query");
+    let socket_before = double.work()[0].peer;
     drop(conn);
 
     pollis_delivery::db::note_transport_fault();
@@ -111,5 +117,9 @@ async fn a_connection_released_before_a_fault_is_still_reused() {
     assert!(
         served[0].had_baton,
         "a parked connection is not touched by a later fault: {served:?}"
+    );
+    assert_ne!(
+        served[0].peer, socket_before,
+        "its stream is kept, but it sends on a new socket: the fault may have been the old one's (#2179)"
     );
 }

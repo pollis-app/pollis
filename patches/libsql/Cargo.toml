@@ -30,6 +30,32 @@
 #   release must not describe before a query either; and grep the workspace
 #   for remote `columns()`/`column_count()` callers.
 #
+# Edit 3 (#2179), src/hrana/hyper.rs, src/database.rs, src/database/builder.rs,
+# src/lib.rs, and `time` added to `[dependencies.tokio]` features below: one
+# keep-alive socket pool per remote `Database`.
+#   Why: upstream builds a hyper client per `HttpSender`, i.e. per
+#   `Connection`, so a socket lived exactly as long as its connection, and the
+#   DS (which drops a connection whose stream may have expired after 3 s) paid
+#   fresh TCP + TLS handshakes to both databases after every lull.
+#   - `SharedHttpClient`: one client per `Database`, never process-global, so
+#     main, log and the transparency-log builder never share sockets.
+#     `pool_idle_timeout` = `REMOTE_POOL_IDLE_TIMEOUT` (20 s), under Turso's
+#     measured 30.0 s idle close; hyper's retry of a request that never reached
+#     the wire is left at its default.
+#   - A failed exchange or a 5xx answer drops the whole pool, so no request
+#     reuses a socket a fault came on (a wedged node stays wedged);
+#     `Database::reset_remote_http_pool` does the same on demand (the DS calls
+#     it after any transient fault, #1500).
+#   - `DrainOnDrop`: a streamed `/v3/cursor` body is read to its end in the
+#     background when its reader stops early (bounded: 1 MiB, 5 s), because
+#     hyper re-pools a socket only after its answer was read to the end.
+#     Without it every remote read dialed a new socket, shared pool or not.
+#   Guarded by `pollis-delivery/tests/conn_pool.rs` (socket counts against the
+#   hrana double) and `tests/remote_sqld.rs` (a real sqld).
+#   When deleting the patch: the upstream release must pool sockets per
+#   `Database` (or the DS must stop dropping connections), keep reads from
+#   leaking sockets, and still never reuse a socket after a fault; run both.
+#
 # Provenance: every file here except this Cargo.toml and the files named above
 # is byte-identical to the published crate `libsql-0.10.0.crate` (sha256
 # d6bca1704194048f0f0bbc8a8e05ba85c0c67628b03bd59346dd2fdd946a1588, the
@@ -356,7 +382,7 @@ version = "1.0.40"
 
 [dependencies.tokio]
 version = "1.29.1"
-features = ["sync"]
+features = ["sync", "time"]
 optional = true
 
 [dependencies.tokio-stream]

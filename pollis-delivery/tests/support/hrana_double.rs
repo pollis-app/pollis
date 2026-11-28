@@ -293,12 +293,10 @@ async fn cursor(
             "last_inserted_rowid": null,
         }));
     }
-    let mut out = String::new();
-    for line in lines {
-        out.push_str(&line.to_string());
-        out.push('\n');
-    }
-    out.into_response()
+    // Streamed line by line (chunked), as sqld and Turso send a cursor.
+    let chunks: Vec<Result<String, std::convert::Infallible>> =
+        lines.into_iter().map(|line| Ok(format!("{line}\n"))).collect();
+    axum::body::Body::from_stream(futures::stream::iter(chunks)).into_response()
 }
 
 pub async fn start_double() -> (Arc<Double>, String) {

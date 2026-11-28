@@ -7146,6 +7146,7 @@ dependencies = [
  "axum 0.7.9",
  "base64 0.22.1",
  "chrono",
+ "futures",
  "hex",
  "hmac 0.12.1",
  "http-body-util",

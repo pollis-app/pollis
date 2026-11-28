@@ -297,3 +297,78 @@ async fn a_welcome_is_fetched_over_hrana() {
     let welcomes = body["welcomes"].as_array().expect("welcomes");
     assert_eq!(welcomes.len(), 1, "{body}");
 }
+
+/// #2179 fault injection on the commit path: the COMMIT reaches the server and
+/// is applied, then the socket dies before the answer comes back. The DS
+/// answers 503 (a transient fault), the next request goes out on a NEW socket,
+/// and the log holds exactly the submitter's commit at that epoch, byte for
+/// byte, so the client's reconcile (`our_commit_is_canonical`) adopts it; a
+/// resubmission is refused with that same commit as the head. Never a fork.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a local sqld; see support/sqld.rs"]
+async fn a_commit_whose_answer_is_lost_is_adopted_never_forked() {
+    use axum::response::IntoResponse as _;
+    let fx = fixture().await;
+    let body = commit_body("g", 0, "alice", None);
+
+    // Warm the log database's socket pool.
+    fx.log.db.conn().await.unwrap().query("SELECT 1", ()).await.unwrap();
+    let sockets_before = fx.log.proxy.sockets();
+
+    fx.log.proxy.cut_after_request_containing(r#""sql":"COMMIT""#);
+    let main = fx.main.db.conn().await.unwrap();
+    let log = fx.log.db.conn().await.unwrap();
+    let err = submit_commit_with(&main, &log, &body, LeafCheck::Skip)
+        .await
+        .expect_err("the COMMIT's answer never arrives");
+    assert!(fx.log.proxy.did_cut(), "the cut happened after the COMMIT went out");
+    assert!(
+        pollis_delivery::error::is_transient_db_error(&err),
+        "a lost answer is transient, so the client retries: {err:#}"
+    );
+    // What the handler's `?` does with it.
+    let response = pollis_delivery::error::AppError::from(err).into_response();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    drop((main, log));
+
+    // The commit landed: exactly one, the submitter's own bytes.
+    let log = fx.log.db.conn().await.unwrap();
+    let commits = fetch_commits(&log, "g", 0, 0).await.expect("a read after the fault");
+    assert!(
+        fx.log.proxy.sockets() > sockets_before,
+        "the request after the fault opened a new socket"
+    );
+    assert_eq!(commits.len(), 1, "{commits:?}");
+    assert_eq!(commits[0].commit, body.commit, "the stored commit is the submitter's own");
+    drop(log);
+
+    match submit(&fx, &body).await {
+        SubmitResponse::Rejected { head, missing, .. } => {
+            assert_eq!(head, 1);
+            assert_eq!(missing.len(), 1);
+            assert_eq!(missing[0].commit, body.commit, "the head is the client's own commit");
+        }
+        other => panic!("a resubmit must not land a second commit at epoch 0: {other:?}"),
+    }
+    let log = fx.log.db.conn().await.unwrap();
+    assert_eq!(fetch_commits(&log, "g", 0, 0).await.unwrap().len(), 1, "no fork");
+}
+
+/// #2179: requests after a lull reuse the database's warm socket.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a local sqld; see support/sqld.rs"]
+async fn sends_after_a_lull_reuse_the_warm_socket() {
+    let fx = fixture().await;
+    fx.call("/v1/conversations/catch-up", catch_up_body("c")).await;
+    let (main_before, log_before) = (fx.main.proxy.sockets(), fx.log.proxy.sockets());
+    for i in 0..2 {
+        // Past the 3 s a parked connection may idle: its stream is discarded.
+        tokio::time::sleep(std::time::Duration::from_millis(3200)).await;
+        let (status, body) = fx
+            .call("/v1/messages/send", send_body(&format!("lull-{i}"), "c"))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    assert_eq!(fx.main.proxy.sockets(), main_before, "no new main socket after a lull");
+    assert_eq!(fx.log.proxy.sockets(), log_before, "no new log socket after a lull");
+}

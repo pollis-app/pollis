@@ -4,18 +4,25 @@
 //!
 //! ## Why connections are pooled (#777)
 //!
-//! A fresh remote `Connection` builds a new hyper client with an empty pool; reuse keeps it warm.
+//! A `Connection` carries a hrana stream; reusing one saves opening another.
+//! The TCP + TLS socket under it is not the connection's: every connection of
+//! one [`Db`] sends through that database's one keep-alive pool
+//! (`patches/libsql`, #2179), so a socket outlives the 3 s a stream may idle.
 //!
 //! Reuse is safe because:
 //!
 //! 1. **Checkout is exclusive.** No two callers hold one `Connection` (per-connection state, one stream).
 //! 2. **Parked connections are bounded in age** since last *use* ([`DEFAULT_MAX_IDLE`], #1500).
 //! 3. **A connection that saw a transport failure is never parked** ([`note_transport_fault`]).
+//! 4. **A socket that saw one is never reused** (#2179): libsql drops a
+//!    database's pooled sockets itself after a failed exchange or a 5xx, and
+//!    every [`Db`] drops its own again on the first checkout or statement after
+//!    any [`note_transport_fault`].
 //!
 //! Transactions get their own hrana stream, so pooling never shares statement context.
 
 use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -39,7 +46,8 @@ struct Parked {
 /// not parked again.
 static TRANSPORT_FAULTS: AtomicU64 = AtomicU64::new(0);
 
-/// Record a transient database failure (#1500): connections checked out now are dropped on release.
+/// Record a transient database failure (#1500): connections checked out now are dropped on release,
+/// and every [`Db`] opens new sockets for its next request (#2179).
 ///
 /// Coarse on purpose: dropping a healthy one only costs a reconnect.
 pub fn note_transport_fault() {
@@ -91,21 +99,42 @@ impl Pool {
 pub struct ConnGuard {
     /// `Some` for the guard's whole life; `Drop` takes it to park it.
     conn: Option<Connection>,
-    pool: Arc<Pool>,
+    /// The database it came from, for its pool and its sockets.
+    db: Db,
     /// When a parked connection was last used before this checkout; `None` for
     /// a new one, which has no stream to go stale.
     last_used: Option<Instant>,
-    /// Whether anything reached the connection; an untouched guard keeps its old age.
-    touched: AtomicBool,
+    /// When the latest statement through this guard started; `None` while
+    /// untouched, so an untouched guard keeps its old age.
+    ///
+    /// Stamped as each statement starts, before its request goes out, never
+    /// at release: a guard that ran a statement and then sat idle while still
+    /// checked out must not park as fresh (#2179), and an age counted from
+    /// before the request can only err older.
+    last_touch: Mutex<Option<Instant>>,
     /// [`TRANSPORT_FAULTS`] at checkout.
     faults_at_checkout: u64,
+}
+
+impl ConnGuard {
+    /// When this connection was last used, as the pool counts its age.
+    fn age_from(&mut self) -> Instant {
+        let touched = *self.last_touch.get_mut().unwrap_or_else(|e| e.into_inner());
+        match (touched, self.last_used) {
+            (Some(at), _) => at,
+            (None, Some(last_used)) => last_used,
+            (None, None) => Instant::now(),
+        }
+    }
 }
 
 impl Deref for ConnGuard {
     type Target = Connection;
 
     fn deref(&self) -> &Connection {
-        self.touched.store(true, Ordering::Relaxed);
+        *self.last_touch.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        // A statement is about to go out: on sockets no fault has touched.
+        self.db.refresh_sockets_after_fault();
         self.conn
             .as_ref()
             .expect("connection is only taken in Drop")
@@ -114,17 +143,14 @@ impl Deref for ConnGuard {
 
 impl Drop for ConnGuard {
     fn drop(&mut self) {
+        let since = self.age_from();
         let Some(conn) = self.conn.take() else {
             return;
         };
         if transport_faults() != self.faults_at_checkout {
             return;
         }
-        let since = match self.last_used {
-            Some(last_used) if !*self.touched.get_mut() => last_used,
-            _ => Instant::now(),
-        };
-        self.pool.park(conn, since);
+        self.db.pool.park(conn, since);
     }
 }
 
@@ -148,7 +174,7 @@ const REMOTE_PRAGMAS: PerConnPragmas = &[];
 /// `journal_mode=WAL` is per file, set in [`Db::connect_local`].
 const LOCAL_PRAGMAS: PerConnPragmas = &["PRAGMA busy_timeout=5000", "PRAGMA foreign_keys=OFF"];
 
-/// `Clone` is shallow: clones share the `Database` and the pool.
+/// `Clone` is shallow: clones share the `Database`, its sockets and the pool.
 #[derive(Clone)]
 pub struct Db {
     db: Arc<Database>,
@@ -156,6 +182,8 @@ pub struct Db {
     max_idle: Duration,
     /// Stamped on every connection this `Db` builds — see [`PerConnPragmas`].
     pragmas: PerConnPragmas,
+    /// [`TRANSPORT_FAULTS`] when this database's sockets were last dropped (#2179).
+    sockets_fresh_at: Arc<AtomicU64>,
 }
 
 impl Db {
@@ -189,6 +217,17 @@ impl Db {
             pool: Arc::new(Pool::default()),
             max_idle: DEFAULT_MAX_IDLE,
             pragmas,
+            sockets_fresh_at: Arc::new(AtomicU64::new(transport_faults())),
+        }
+    }
+
+    /// #1500 extended to sockets (#2179): after any [`note_transport_fault`],
+    /// the next request on this database opens a new TCP connection instead
+    /// of reusing one the fault may have come from. Cheap when nothing failed.
+    fn refresh_sockets_after_fault(&self) {
+        let faults = transport_faults();
+        if self.sockets_fresh_at.swap(faults, Ordering::SeqCst) != faults {
+            self.db.reset_remote_http_pool();
         }
     }
 
@@ -208,6 +247,7 @@ impl Db {
     /// Never blocks on the pool: an empty pool builds a connection.
     pub async fn conn(&self) -> Result<ConnGuard> {
         let faults_at_checkout = transport_faults();
+        self.refresh_sockets_after_fault();
         let (conn, last_used) = match self.pool.take(self.max_idle) {
             Some(parked) => (parked.conn, Some(parked.since)),
             None => {
@@ -220,9 +260,9 @@ impl Db {
         };
         Ok(ConnGuard {
             conn: Some(conn),
-            pool: Arc::clone(&self.pool),
+            db: self.clone(),
             last_used,
-            touched: AtomicBool::new(false),
+            last_touch: Mutex::new(None),
             faults_at_checkout,
         })
     }
