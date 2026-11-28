@@ -668,3 +668,46 @@ async fn a_re_add_welcome_waits_for_a_pass_holding_the_group() {
     assert!(!got.contains(&"while bob is out"), "{msgs:#?}");
     assert!(placeholders(&msgs).is_empty(), "nothing was lost: {msgs:#?}");
 }
+
+/// A channel is created and written to while a member's device is locked; the
+/// unlock republishes the device's cert. Every message must still reach it:
+/// nothing about re-publishing a cert may move the device's cursor past mail it
+/// never fetched.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_channel_written_while_a_member_was_locked_reaches_them_after_unlock() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Locked").await;
+    let general = alice.general_channel_id(&group_id).await;
+    add_member(&alice, &group_id, &general, &bob, &bob_p).await;
+    alice.send_channel_message(&general, "before").await;
+    assert!(contents(&bob.fetch_channel_messages(&general).await).contains(&"before"));
+
+    bob.invoke_json("lock", serde_json::json!({})).await;
+
+    let later = alice.create_channel(&group_id, "later").await;
+    let sent: Vec<String> = (1..=5).map(|i| format!("m{i}")).collect();
+    for m in &sent {
+        alice.send_channel_message(&later, m).await;
+    }
+
+    bob.invoke_try(
+        "unlock",
+        serde_json::json!({ "userId": bob.user_id(), "pin": crate::harness::TEST_PIN }),
+    )
+    .await
+    .expect("unlock");
+    bob.poll().await;
+
+    let got = bob.fetch_channel_messages(&later).await;
+    let have = contents(&got);
+    let missing: Vec<&String> = sent.iter().filter(|m| !have.contains(&m.as_str())).collect();
+    assert!(missing.is_empty(), "bob never received {missing:?} (has {have:?})");
+    assert!(placeholders(&got).is_empty(), "{got:#?}");
+}

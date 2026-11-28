@@ -110,8 +110,10 @@ async fn add_member_rows(conn: &Connection, group_id: &str, user_id: &str) -> an
         libsql::params![group_id.to_string(), user_id.to_string()],
     )
     .await?;
-    // Best-effort seed so pre-join messages don't block envelope GC (#685, #720, #908).
-    let _ = conn
+    // Seeded with the membership, in its transaction, so pre-join messages
+    // (the first accepted loss) don't block envelope GC (#685, #720, #908).
+    // Not best-effort: a join without its seed must not commit.
+    conn
         .execute(
             "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at)
              SELECT c.id, ?1, ud.device_id, ?3,
@@ -126,7 +128,42 @@ async fn add_member_rows(conn: &Connection, group_id: &str, user_id: &str) -> an
                 crate::messages::seeded_watermark_cursor()
             ],
         )
-        .await;
+        .await?;
+    Ok(())
+}
+
+/// Seed a NEW channel's watermark for every live, certified device of every
+/// group member, at its start (no counter yet: 0), in the transaction that
+/// creates it. A device that has not published its cert yet is not real yet
+/// (#1092); its first publish seeds it, as a new device.
+///
+/// Each of those devices is owed every envelope the channel will ever hold.
+/// The row says so (0 = fetch everything, exactly what a missing row meant),
+/// and makes the device pin the channel's retention under the #720 bound from
+/// the start, so no later seed can place its cursor past mail it never
+/// fetched: every seed is `INSERT OR IGNORE`, and this row is already there.
+async fn seed_new_channel_watermarks(
+    conn: &Connection,
+    channel_id: &str,
+    group_id: &str,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO conversation_watermark \
+             (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at) \
+         SELECT ?1, gm.user_id, ud.device_id, ?3, \
+                COALESCE((SELECT next_seq FROM conversation_seq WHERE conversation_id = ?1), 0), \
+                datetime('now') \
+         FROM group_member gm \
+         JOIN user_device ud ON ud.user_id = gm.user_id AND ud.revoked_at IS NULL \
+                            AND ud.mls_signature_pub IS NOT NULL \
+         WHERE gm.group_id = ?2",
+        libsql::params![
+            channel_id.to_string(),
+            group_id.to_string(),
+            crate::messages::seeded_watermark_cursor()
+        ],
+    )
+    .await?;
     Ok(())
 }
 
@@ -493,6 +530,7 @@ pub async fn apply_create_channel(
     .await?;
     block.push(body.id.clone());
     crate::channel_order::renumber_block(&tx, category, &block).await?;
+    seed_new_channel_watermarks(&tx, &body.id, &body.group_id).await?;
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
