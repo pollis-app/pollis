@@ -19,9 +19,7 @@ tags:
     id: "tab-direct"
 - extendedWaitUntil:
     visible:
-      id: "unread-.*"
-      containsChild:
-        text: "2"
+      text: ".*, 2 unread, .*"
     timeout: 60000
 - takeScreenshot: unread-02-after-resume
 # Leave it unread and close the app; the peer sends again while it is closed.
