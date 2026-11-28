@@ -1,0 +1,23 @@
+/*
+ * Linker version script for libpollis-native.so (#2189), passed from build.gradle.
+ *
+ * Only the JNI entry points are exported. Everything else (the Rust core, its OpenSSL and
+ * SQLCipher, the uniffi/JSI glue) is local, so --gc-sections can drop what nothing reaches and
+ * the loader resolves a handful of symbols instead of ~74,000. The uniffi and pollis_notify_*
+ * functions need no export: cpp-adapter.cpp and the JSI glue call them inside this library.
+ *
+ * - JNI_OnLoad is Rust (pollis-core/src/keystore.rs): it captures the JavaVM android_kek needs,
+ *   so PIN unlock depends on it. Never hide it (never -Wl,--exclude-libs on libpollis_core.a).
+ * - Java_* covers every `external fun` in PollisNativeModule.kt and PollisNotify.kt. A new JNI
+ *   entry point must keep the Java_ prefix (JNIEXPORT, extern "C") or be listed here.
+ *
+ * build.gradle's verifyPollisNativeExports fails the build if any required entry point is
+ * missing from the built library, or if more than a few symbols are exported.
+ */
+{
+  global:
+    JNI_OnLoad;
+    Java_*;
+  local:
+    *;
+};

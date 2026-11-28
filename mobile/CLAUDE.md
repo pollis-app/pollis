@@ -150,6 +150,19 @@ The bridge is a local RN turbo-module that links our `pollis-core` Rust crate in
 - `cargo-ndk` compiles `pollis-core` for `arm64-v8a`, `armeabi-v7a`, `x86_64` as `.a` (static)
 - `uniffi-bindgen-react-native` generates TS bindings (`src/generated/`), C++ JSI glue (`cpp/`), and CMake setup (`android/CMakeLists.txt`)
 - CMake statically links the Rust `.a` into a turbo-module `.so`
+- **The `.so` exports only its JNI entry points (#2189).** `android/exports.map` is the
+  linker version script (`global: JNI_OnLoad; Java_*; local: *;`), passed from
+  `android/build.gradle` (`noOverwrite`) as `CMAKE_SHARED_LINKER_FLAGS`, never from the
+  generated `CMakeLists.txt`, which ubrn rewrites. Everything else is local, so
+  `--gc-sections` drops what nothing reaches (x86_64 `.so` 38.7 MB → 17.4 MB) and the loader
+  resolves a handful of symbols, not ~74,000. **A new JNI entry point must be named
+  `Java_…` (`extern "C"` + `JNIEXPORT`) or be added to the map**, and to
+  `pollisRequiredExports` in `build.gradle`, whose `verifyPollisNativeExports` step runs
+  `llvm-readelf --dyn-syms` after every `buildCMake<Config>[<abi>]` link and fails the
+  build if `JNI_OnLoad` or one of the five `Java_com_pollisnative_*` symbols is missing, or
+  if more than 16 symbols are exported. Never `-Wl,--exclude-libs` on `libpollis_core.a`: it
+  hides the Rust `JNI_OnLoad`, so `android_kek` never gets the JavaVM and PIN unlock fails.
+  The NDK link already passes `--no-undefined-version`. Native, so store build only.
 
 ### Dev loop — Rust changes
 

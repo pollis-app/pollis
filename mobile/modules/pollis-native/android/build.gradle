@@ -75,7 +75,12 @@ android {
     }
     externalNativeBuild {
       cmake {
-        arguments '-DANDROID_STL=c++_shared'
+        // #2189: export only the JNI entry points (exports.map), so the linker can drop what
+        // nothing reaches and the loader resolves a handful of symbols, not ~74,000. Passed
+        // from here, not CMakeLists.txt, because ubrn regenerates that file; the generated
+        // CMakeLists.txt appends its own flags to CMAKE_SHARED_LINKER_FLAGS, keeping this one.
+        arguments '-DANDROID_STL=c++_shared',
+                  "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--version-script=${projectDir}/exports.map"
         abiFilters (*reactNativeArchitectures())
       }
     }
@@ -157,5 +162,73 @@ if (isNewArchitectureEnabled()) {
     jsRootDir = file("../src/")
     libraryName = "PollisNative"
     codegenJavaPackageName = "com.pollisnative"
+  }
+}
+
+// #2189: the built libpollis-native.so must export every JNI entry point the app and the push
+// process call, and almost nothing else (exports.map). A missing JNI_OnLoad breaks PIN unlock
+// (android_kek never gets the JavaVM); a missing Java_* entry point fails its `external fun`.
+// Checked on the library each native build links, so a regression fails the build, CI included.
+def pollisRequiredExports = [
+  "JNI_OnLoad",
+  "Java_com_pollisnative_PollisNativeModule_nativeInstallRustCrate",
+  "Java_com_pollisnative_PollisNativeModule_nativeCleanupRustCrate",
+  "Java_com_pollisnative_PollisNotify_nativeFetch",
+  "Java_com_pollisnative_PollisNotify_nativeNote",
+  "Java_com_pollisnative_PollisNotify_nativeSettle",
+]
+// The required six plus a little room; without the version script it is ~74,000.
+def pollisMaxExports = 16
+
+def pollisReadelf = {
+  def prebuilt = new File(android.ndkDirectory, "toolchains/llvm/prebuilt")
+  def host = prebuilt.listFiles()?.find { it.isDirectory() }
+  if (host == null) {
+    throw new GradleException("verifyPollisNativeExports: no NDK prebuilt toolchain under ${prebuilt}")
+  }
+  def exe = new File(host, "bin/llvm-readelf")
+  return exe.exists() ? exe : new File(host, "bin/llvm-readelf.exe")
+}
+
+def pollisVerifyExports = { File so ->
+  def proc = new ProcessBuilder(pollisReadelf().absolutePath, "--dyn-syms", "--wide", so.absolutePath)
+    .redirectErrorStream(true)
+    .start()
+  def text = proc.inputStream.text
+  if (proc.waitFor() != 0) {
+    throw new GradleException("verifyPollisNativeExports: llvm-readelf failed on ${so}:\n${text}")
+  }
+  // `Num: Value Size Type Bind Vis Ndx Name`: a defined GLOBAL or WEAK symbol is an export.
+  def exported = text.readLines()
+    .collect { it.trim().split(/\s+/) }
+    .findAll { it.length >= 8 && it[0].endsWith(":") && it[6] != "UND" && (it[4] == "GLOBAL" || it[4] == "WEAK") }
+    .collect { it[7].replaceAll(/@.*$/, "") }
+    .toSet()
+  def missing = pollisRequiredExports.findAll { !exported.contains(it) }
+  if (!missing.isEmpty()) {
+    throw new GradleException("verifyPollisNativeExports: ${so} does not export ${missing} (see exports.map)")
+  }
+  if (exported.size() > pollisMaxExports) {
+    throw new GradleException("verifyPollisNativeExports: ${so} exports ${exported.size()} symbols, more than ${pollisMaxExports}; is exports.map passed to the link?")
+  }
+  logger.lifecycle("verifyPollisNativeExports: ${so.parentFile.name}/${so.name} exports ${exported.sort()}")
+}
+
+// AGP links each ABI in `buildCMake<Config>[<abi>]`; check that ABI's library right after.
+tasks.configureEach { task ->
+  def m = task.name =~ /^buildCMake(\w+)\[(.+)\]$/
+  if (m.matches()) {
+    def config = m.group(1)
+    def abi = m.group(2)
+    task.doLast {
+      // The newest library for the ABI: a changed CMake argument links into a new hash
+      // directory and leaves the old one behind.
+      def root = new File(layout.buildDirectory.get().asFile, "intermediates/cxx/${config}")
+      def libs = fileTree(root) { include "*/obj/${abi}/libpollis-native.so" }.files
+      if (libs.isEmpty()) {
+        throw new GradleException("verifyPollisNativeExports: no ${abi} libpollis-native.so under ${root}")
+      }
+      pollisVerifyExports(libs.max { it.lastModified() })
+    }
   }
 }
