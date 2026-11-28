@@ -3,7 +3,7 @@
 //!
 //! A kill is `test_hooks::crash_next_send`; a restart is `lock` + `unlock`.
 
-use crate::harness::{wipe, writable_remote, TestClient, TEST_PIN};
+use crate::harness::{wipe, writable_remote, TestClient};
 use pollis_core::commands::messages::test_hooks::{self, Crash};
 use serde_json::json;
 use serial_test::serial;
@@ -58,14 +58,6 @@ async fn envelopes_with_id(id: &str) -> i64 {
     rows.next().await.expect("row").expect("a row").get(0).expect("count")
 }
 
-async fn restart(client: &TestClient) {
-    let uid = client.user_id().to_string();
-    client.invoke_json("lock", json!({})).await;
-    client
-        .invoke_json("unlock", json!({ "userId": uid, "pin": TEST_PIN }))
-        .await;
-}
-
 async fn send_with_id(
     client: &TestClient,
     channel_id: &str,
@@ -118,7 +110,7 @@ async fn a_send_killed_after_the_local_insert_is_delivered_after_unlock() {
     assert_eq!(copies(&bob, &channel_id, "sent before the kill").await, 0);
 
     // An explicit drain waits behind the unlock's, so this is deterministic.
-    restart(&alice).await;
+    alice.relaunch().await;
     alice.invoke_json("flush_outbox", json!({})).await;
 
     let row = own_row(&alice, &channel_id, &plain).await.expect("still there");
@@ -149,7 +141,7 @@ async fn a_send_killed_after_the_post_is_not_delivered_twice() {
     assert_eq!(row["send_state"], "pending", "this device never recorded the post");
     let sent_at = row["sent_at"].clone();
 
-    restart(&alice).await;
+    alice.relaunch().await;
     let report = alice.invoke_json("flush_outbox", json!({})).await;
     assert!(report["failed"].as_array().expect("failed").is_empty(), "{report}");
 
@@ -264,7 +256,7 @@ async fn an_attachment_send_killed_before_its_upload_is_delivered_after_unlock()
     assert!(!provisional.contains("\"key\""), "nothing uploaded yet: {provisional}");
     assert_eq!(envelopes_with_id(&id).await, 0);
 
-    restart(&alice).await;
+    alice.relaunch().await;
     alice.invoke_json("flush_outbox", json!({})).await;
 
     let row = own_row(&alice, &channel_id, &id).await.expect("still there");
@@ -536,7 +528,7 @@ async fn a_long_queued_message_lands_with_the_time_it_went_out() {
         .to_string();
 
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-    restart(&alice).await;
+    alice.relaunch().await;
     alice.invoke_json("flush_outbox", json!({})).await;
 
     let row = own_row(&alice, &channel_id, &id).await.expect("row");
@@ -727,7 +719,7 @@ async fn a_burst_killed_mid_delivery_is_delivered_once_each_in_order_after_resta
     rendezvous::disarm(Point::EnvelopeBeforePost);
     drop(release);
 
-    restart(&alice).await;
+    alice.relaunch().await;
     alice.invoke_json("flush_outbox", json!({})).await;
 
     let line = own_line(&alice, &channel_id, &ids).await;
@@ -1268,7 +1260,7 @@ async fn an_edit_of_a_never_sealed_message_is_what_gets_sent() {
     assert_eq!(row["send_state"], "pending", "still unsent: {row}");
     assert_eq!(envelopes_with_id(&id).await, 0);
 
-    restart(&alice).await;
+    alice.relaunch().await;
     alice.invoke_json("flush_outbox", json!({})).await;
 
     assert_eq!(copies(&bob, &channel_id, "the fix").await, 1);

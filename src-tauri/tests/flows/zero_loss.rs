@@ -325,13 +325,6 @@ async fn try_edit(c: &TestClient, channel: &str, id: &str, text: &str) -> Result
     .await
 }
 
-async fn restart(c: &TestClient) {
-    let uid = c.user_id().to_string();
-    c.invoke_json("lock", json!({})).await;
-    c.invoke_json("unlock", json!({ "userId": uid, "pin": crate::harness::TEST_PIN }))
-        .await;
-}
-
 /// Dies with the edit stored and unposted (#1555); the drain delivers it.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
@@ -349,7 +342,7 @@ async fn an_editor_killed_between_storing_and_posting_converges() {
     assert_eq!(mine["content"], "final");
     assert_eq!(mine["edit_state"], "pending");
 
-    restart(&alice).await;
+    alice.relaunch().await;
     drain(&alice).await;
     for (c, who) in [(&bob, "bob"), (&alice, "alice")] {
         assert_reads_all(c, who, &channel, &["final"]).await;
@@ -372,7 +365,7 @@ async fn an_editor_killed_after_the_post_converges_without_a_fork() {
     assert_reads_all(&bob, "bob", &channel, &["final"]).await;
     assert_eq!(read_one(&alice, &channel, &id).await["edit_state"], "pending");
 
-    restart(&alice).await;
+    alice.relaunch().await;
     drain(&alice).await;
     for (c, who) in [(&bob, "bob"), (&alice, "alice")] {
         assert_reads_all(c, who, &channel, &["final"]).await;

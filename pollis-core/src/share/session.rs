@@ -3,7 +3,7 @@
 //! The extension is a separate process with no app running in it, so it builds a headless
 //! state the way the Notification Service Extension's fetch does (#1599): the App Group data
 //! dir, the shared keychain group, no realtime, LiveKit or media server, and the database opened
-//! with [`LocalDb::open_existing_for_user_in`], which never creates, migrates or wipes.
+//! with [`LocalDb::open_existing_for_user_in`], which never creates or wipes (its only schema write is the owed-receipt table).
 //!
 //! Unlike the notification fetch it never reads the notification escrow: the user unlocks it
 //! with the PIN (through [`pin::check_pin`], the app's own counter and lockout) or with
@@ -200,7 +200,7 @@ pub async fn unlock(factor: Factor) -> Unlock {
             }
         }
     };
-    let db = match LocalDb::open_existing_for_user_in(&data_dir, &user_id, &unlocked.db_key) {
+    let db = match LocalDb::open_existing_for_user_in(&data_dir, &user_id, &unlocked.db_key, &state.state_lock) {
         Ok(db) => db,
         Err(e) => {
             crate::diag!("[share] local database would not open: {e}");
@@ -293,7 +293,7 @@ fn reopen_if_parked() {
     let Ok(mut slot) = session.state.local_db.try_lock() else {
         return;
     };
-    match LocalDb::open_existing_for_user_in(&session.data_dir, &session.user_id, &key) {
+    match LocalDb::open_existing_for_user_in(&session.data_dir, &session.user_id, &key, &session.state.state_lock) {
         Ok(db) => {
             *slot = Some(db);
             session.parked = false;

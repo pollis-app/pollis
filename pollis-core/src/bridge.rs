@@ -396,7 +396,7 @@ pub(crate) fn reopen_parked_db() {
     if slot.is_some() {
         return;
     }
-    match crate::db::local::LocalDb::open_existing_for_user_in(&state.local_data_dir(), &user, &key) {
+    match crate::db::local::LocalDb::open_existing_for_user_in(&state.local_data_dir(), &user, &key, &state.state_lock) {
         Ok(db) => {
             // #2084: a rename made while this app was in the background shows on return.
             crate::commands::user_cache::mark_all_stale(db.conn());

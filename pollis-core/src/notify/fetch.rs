@@ -288,7 +288,7 @@ async fn run_locked(
     };
 
     // 4. The app's database, opened without any of the app's open-time housekeeping.
-    let db = match LocalDb::open_existing_for_user_in(&data_dir, user_id, db_key) {
+    let db = match LocalDb::open_existing_for_user_in(&data_dir, user_id, db_key, &state.state_lock) {
         Ok(db) => db,
         Err(crate::error::Error::Database(rusqlite::Error::SqliteFailure(f, _)))
             if f.code == rusqlite::ErrorCode::NotADatabase =>

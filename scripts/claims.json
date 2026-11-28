@@ -5452,9 +5452,9 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "3.8 The notification key escrow (mobile only, #1599)",
-        "quote": "It opens the existing file read-write but never creates, migrates or wipes it (`LocalDb::open_existing_for_user_in`)."
+        "quote": "It opens the existing file read-write but never creates or wipes it, and the only schema it ever adds is the table of receipts this device still owes (`LocalDb::open_existing_for_user_in`)."
       },
-      "claim": "The notification extension never creates, migrates or wipes the DB; a stale escrow is reported as decrypt; MLS steps hold an flock on state.lock.",
+      "claim": "The notification extension never creates or wipes the DB and adds no schema but the owed-receipt table; a stale escrow is reported as decrypt; MLS steps hold an flock on state.lock.",
       "kind": "behaviour",
       "anchors": [
         "pollis-core/src/db/local.rs",
@@ -5462,7 +5462,7 @@
         "pollis-core/src/notify/lock.rs"
       ],
       "evidence": [
-        "pollis-core/src/db/local.rs:153",
+        "pollis-core/src/db/local.rs:347",
         "pollis-core/src/notify/fetch.rs:262",
         "pollis-core/src/notify/lock.rs:1"
       ],

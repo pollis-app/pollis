@@ -114,45 +114,107 @@ const MAX_IDS_PER_RECEIPT: usize = 256;
 /// savepoint that stores the message it acknowledges ([`owe_delivered_on`]), and a read one
 /// when the reader marks it read ([`mark_messages_read`]); only [`drain_owed`] clears a row,
 /// once its envelope landed, or when no receipt may be sent for it (not a DM any more, not a
-/// member, the opt-out). A read row carries the reader's own time (#2140); a delivered one is
-/// stamped when it is sealed. Created by the app's own open only (`LocalDb::open_at`), never by
-/// the extensions' opens; a file the app has not opened since the upgrade has no table, and
-/// then the pass that stores a message sends its receipt once, as before ([`drain_owed`]).
+/// member, the opt-out, a refusal no retry fixes). `at` is the time the receipt states: when the
+/// message was stored (delivered), or the reader's own time (read, #2140); never the time a
+/// drain happened to seal it.
+///
+/// The one definition, applied on every open ([`ensure_receipt_owed`]): strictly by the app's
+/// (`LocalDb::open_at`), best-effort by an extension's (`LocalDb::open_existing_for_user_in`),
+/// and by the store itself when an open could not ([`owe_delivered_on`]).
 pub(crate) const RECEIPT_OWED_DDL: &str = "CREATE TABLE IF NOT EXISTS receipt_owed (
     conversation_id TEXT NOT NULL,
     message_id TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('delivered', 'read')),
-    read_at TEXT,
-    CHECK ((kind = 'read') = (read_at IS NOT NULL)),
+    at TEXT NOT NULL,
     PRIMARY KEY (conversation_id, kind, message_id)
 ) WITHOUT ROWID";
 
-/// Whether this database has [`RECEIPT_OWED_DDL`]'s table.
-fn owed_table_exists(conn: &rusqlite::Connection) -> bool {
-    conn.query_row(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'receipt_owed'",
-        [],
-        |_| Ok(()),
-    )
-    .optional()
-    .ok()
-    .flatten()
-    .is_some()
+/// What this database holds of [`RECEIPT_OWED_DDL`]'s table.
+#[derive(Debug, PartialEq, Eq)]
+enum OwedTable {
+    Missing,
+    Current,
+    /// The unreleased first shape (#2200): only a read row carried a time (`read_at`).
+    PreRelease,
 }
 
-/// Owe the delivered receipt for `message_id`, just stored in DM `conversation_id`. Called in
-/// the savepoint that stores the message, so a stored inbound DM message always has its receipt
-/// sent or owed. Nothing is owed while the opt-out is on. Never fails the store: a file the app
-/// has not opened since the upgrade has no table yet (see [`RECEIPT_OWED_DDL`]).
+fn owed_table(conn: &rusqlite::Connection) -> Result<OwedTable> {
+    let mut stmt = conn.prepare("SELECT name FROM pragma_table_info('receipt_owed')")?;
+    let columns: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(if columns.is_empty() {
+        OwedTable::Missing
+    } else if columns.iter().any(|c| c == "at") {
+        OwedTable::Current
+    } else {
+        OwedTable::PreRelease
+    })
+}
+
+/// Whether this database has [`RECEIPT_OWED_DDL`]'s table, in its current shape.
+pub(crate) fn owed_table_exists(conn: &rusqlite::Connection) -> bool {
+    matches!(owed_table(conn), Ok(OwedTable::Current))
+}
+
+/// Make [`RECEIPT_OWED_DDL`]'s table exist. Once it does, one schema read and nothing written;
+/// else one short write: the `CREATE`, or for the unreleased first shape a rebuild that keeps
+/// every owed row (a delivered one is stamped now, the nearest time it has). In a savepoint, so
+/// it nests inside a store's and never leaves half a rebuild.
+pub(crate) fn ensure_receipt_owed(conn: &rusqlite::Connection) -> Result<()> {
+    let shape = owed_table(conn)?;
+    if shape == OwedTable::Current {
+        return Ok(());
+    }
+    conn.execute_batch("SAVEPOINT receipt_owed_ddl")?;
+    let built = (|| -> Result<()> {
+        if shape == OwedTable::PreRelease {
+            conn.execute_batch("ALTER TABLE receipt_owed RENAME TO receipt_owed_prerelease")?;
+        }
+        conn.execute_batch(RECEIPT_OWED_DDL)?;
+        if shape == OwedTable::PreRelease {
+            conn.execute(
+                "INSERT OR IGNORE INTO receipt_owed (conversation_id, message_id, kind, at)
+                 SELECT conversation_id, message_id, kind, COALESCE(read_at, ?1)
+                 FROM receipt_owed_prerelease",
+                rusqlite::params![super::envelope_sent_at()],
+            )?;
+            conn.execute_batch("DROP TABLE receipt_owed_prerelease")?;
+        }
+        Ok(())
+    })();
+    if let Err(e) = built {
+        let _ = conn.execute_batch("ROLLBACK TO receipt_owed_ddl; RELEASE receipt_owed_ddl");
+        return Err(e);
+    }
+    conn.execute_batch("RELEASE receipt_owed_ddl")?;
+    Ok(())
+}
+
+/// Owe the delivered receipt for `message_id`, just stored in DM `conversation_id`, stamped with
+/// the store time. Called in the savepoint that stores the message, so a stored inbound DM
+/// message always has its receipt sent or owed. Nothing is owed while the opt-out is on. Never
+/// fails the store. A file whose open could not create the table (an extension's open that met
+/// a busy database) gets it here: the store's savepoint already holds the write lock, so the
+/// `CREATE` waits on nobody.
 pub(crate) fn owe_delivered_on(conn: &rusqlite::Connection, conversation_id: &str, message_id: &str) {
     if !receipts_enabled(conn) {
         return;
     }
-    if let Err(e) = conn.execute(
-        "INSERT OR IGNORE INTO receipt_owed (conversation_id, message_id, kind, read_at)
-         VALUES (?1, ?2, 'delivered', NULL)",
-        rusqlite::params![conversation_id, message_id],
-    ) {
+    let at = super::envelope_sent_at();
+    let owe = || -> Result<()> {
+        conn.execute(
+            "INSERT OR IGNORE INTO receipt_owed (conversation_id, message_id, kind, at)
+             VALUES (?1, ?2, 'delivered', ?3)",
+            rusqlite::params![conversation_id, message_id, at],
+        )?;
+        Ok(())
+    };
+    let owed = owe().or_else(|_| {
+        ensure_receipt_owed(conn)?;
+        owe()
+    });
+    if let Err(e) = owed {
         crate::diag!("[receipts] delivered receipt for {conversation_id} not recorded: {e}");
     }
 }
@@ -170,7 +232,7 @@ fn owe_read_on(
     let tx = conn.unchecked_transaction()?;
     for id in message_ids {
         tx.execute(
-            "INSERT OR IGNORE INTO receipt_owed (conversation_id, message_id, kind, read_at)
+            "INSERT OR IGNORE INTO receipt_owed (conversation_id, message_id, kind, at)
              VALUES (?1, ?2, 'read', ?3)",
             rusqlite::params![conversation_id, id, read_at],
         )?;
@@ -179,32 +241,33 @@ fn owe_read_on(
     Ok(())
 }
 
-/// One receipt frame's worth of owed rows: a kind, the reader's time for a read, and the ids.
-#[derive(Debug, PartialEq, Eq)]
+/// One receipt frame's worth of owed rows: a kind, the time the frame states, and the ids.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct OwedBatch {
     kind: ReceiptKind,
-    /// `Some` for a read receipt (the reader's time), `None` for a delivered one.
-    read_at: Option<String>,
+    /// A read frame: the reader's time, shared by every id. A delivered frame: the latest store
+    /// time among its ids, the earliest instant at which this device held all of them.
+    at: String,
     message_ids: Vec<String>,
 }
 
 /// What `conversation_id` owes, as frames of at most [`MAX_IDS_PER_RECEIPT`] ids: delivered
-/// first, then each read time on its own.
+/// first, in store order, then each read time on its own.
 fn owed_batches_on(conn: &rusqlite::Connection, conversation_id: &str) -> Result<Vec<OwedBatch>> {
     let mut stmt = conn.prepare(
-        "SELECT kind, read_at, message_id FROM receipt_owed WHERE conversation_id = ?1
-         ORDER BY kind, read_at, message_id",
+        "SELECT kind, at, message_id FROM receipt_owed WHERE conversation_id = ?1
+         ORDER BY kind, at, message_id",
     )?;
     let rows = stmt.query_map(rusqlite::params![conversation_id], |r| {
         Ok((
             r.get::<_, String>(0)?,
-            r.get::<_, Option<String>>(1)?,
+            r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
         ))
     })?;
     let mut out: Vec<OwedBatch> = Vec::new();
     for row in rows {
-        let (kind, read_at, id) = row?;
+        let (kind, at, id) = row?;
         let kind = match kind.as_str() {
             "delivered" => ReceiptKind::Delivered,
             "read" => ReceiptKind::Read,
@@ -213,14 +276,16 @@ fn owed_batches_on(conn: &rusqlite::Connection, conversation_id: &str) -> Result
         match out.last_mut() {
             Some(last)
                 if last.kind == kind
-                    && last.read_at == read_at
+                    && (kind == ReceiptKind::Delivered || last.at == at)
                     && last.message_ids.len() < MAX_IDS_PER_RECEIPT =>
             {
                 last.message_ids.push(id);
+                // Rows come in time order, so a delivered frame ends on its latest store time.
+                last.at = at;
             }
             _ => out.push(OwedBatch {
                 kind,
-                read_at,
+                at,
                 message_ids: vec![id],
             }),
         }
@@ -250,49 +315,107 @@ fn forget_owed_on(conn: &rusqlite::Connection, conversation_id: &str) -> Result<
     Ok(())
 }
 
-/// Which conversations have a [`drain_owed`] running in this process, and whether it must go
-/// round once more: a drain asked for while one runs never waits (it may be inside that very
-/// drain's re-seal catch-up); the running one picks its rows up.
+/// A drain asked for while one runs: it goes round again, with the ids the asker brought.
 #[derive(Default)]
-pub struct ReceiptDrains(std::sync::Mutex<HashMap<String, bool>>);
+struct Folded {
+    again: bool,
+    /// The asker's `unrecorded` ids ([`drain_owed`]), sent by the next round.
+    unrecorded: Vec<String>,
+}
 
-/// One conversation's running drain. Dropped (finished, failed or cancelled), it lets the next
-/// one start.
+/// Which conversations have a [`drain_owed`] running in this process, and what was asked of it
+/// meanwhile: a drain asked for while one runs never waits (it may be inside that very drain's
+/// re-seal catch-up); the running one goes round again for it, whether its own round landed or
+/// failed, exactly as the asker's own drain would have run.
+#[derive(Default)]
+pub struct ReceiptDrains(std::sync::Mutex<HashMap<String, Folded>>);
+
+/// One conversation's running drain. Ended by [`DrainTurn::next_round`]; dropped before that
+/// (cancelled or panicked), it lets the next one start.
 struct DrainTurn<'a> {
     drains: &'a ReceiptDrains,
     conversation_id: String,
+    ended: bool,
 }
 
 impl ReceiptDrains {
-    fn begin(&self, conversation_id: &str) -> Option<DrainTurn<'_>> {
+    /// Start a drain, or fold this request (and its `unrecorded` ids) into the running one.
+    fn begin(&self, conversation_id: &str, unrecorded: &[String]) -> Option<DrainTurn<'_>> {
         let mut running = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(again) = running.get_mut(conversation_id) {
-            *again = true;
+        if let Some(folded) = running.get_mut(conversation_id) {
+            folded.again = true;
+            folded.unrecorded.extend_from_slice(unrecorded);
             return None;
         }
-        running.insert(conversation_id.to_string(), false);
+        running.insert(conversation_id.to_string(), Folded::default());
         Some(DrainTurn {
             drains: self,
             conversation_id: conversation_id.to_string(),
+            ended: false,
         })
     }
 }
 
 impl DrainTurn<'_> {
-    /// Whether a drain was asked for since this one began; clears the request.
-    fn again(&self) -> bool {
+    /// The request folded in since this round began (with its ids), or else the end of this
+    /// drain, decided under one lock: a request can never land between "nothing more" and the
+    /// end, where nobody would run it.
+    fn next_round(&mut self) -> Option<Vec<String>> {
         let mut running = self.drains.0.lock().unwrap_or_else(|e| e.into_inner());
-        running
-            .get_mut(&self.conversation_id)
-            .map(std::mem::take)
-            .unwrap_or(false)
+        if let Some(folded) = running.get_mut(&self.conversation_id) {
+            if folded.again {
+                folded.again = false;
+                return Some(std::mem::take(&mut folded.unrecorded));
+            }
+        }
+        running.remove(&self.conversation_id);
+        self.ended = true;
+        None
     }
 }
 
 impl Drop for DrainTurn<'_> {
     fn drop(&mut self) {
+        if self.ended {
+            return;
+        }
         let mut running = self.drains.0.lock().unwrap_or_else(|e| e.into_inner());
         running.remove(&self.conversation_id);
+    }
+}
+
+/// [`drain_owed`]'s turn-taking, with the round lifted out so tests can fail it. A round that
+/// fails while a request was folded in goes round again for that request; the result is the
+/// last round's.
+async fn run_drain<F, Fut>(
+    drains: &ReceiptDrains,
+    conversation_id: &str,
+    unrecorded: &[String],
+    mut round: F,
+) -> Result<()>
+where
+    F: FnMut(Vec<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
+    let Some(mut turn) = drains.begin(conversation_id, unrecorded) else {
+        // A drain is running here; it goes round again for whatever this one would send.
+        return Ok(());
+    };
+    let mut ids = unrecorded.to_vec();
+    loop {
+        let result = round(ids).await;
+        match turn.next_round() {
+            Some(more) => {
+                if let Err(e) = &result {
+                    crate::diag!(
+                        "[receipts] receipts for {conversation_id} not sent yet ({e}); going round \
+                         again for a drain asked for meanwhile"
+                    );
+                }
+                ids = more;
+            }
+            None => return result,
+        }
     }
 }
 
@@ -307,26 +430,19 @@ impl Drop for DrainTurn<'_> {
 /// seals nothing and keeps what it owes for the next drain.
 ///
 /// `unrecorded`: what the caller's pass just stored, sent from memory only when this database
-/// has no owed-receipt table yet (an extension's open before the app's first open since the
-/// upgrade, see [`RECEIPT_OWED_DDL`]). Ignored otherwise: those rows are already owed.
+/// has no owed-receipt table (every open and the store itself create it, [`RECEIPT_OWED_DDL`],
+/// so only a database that refused the `CREATE` outright). Ignored otherwise: those rows are
+/// already owed.
 pub(crate) async fn drain_owed(
     state: &Arc<AppState>,
     user_id: &str,
     conversation_id: &str,
     unrecorded: &[String],
 ) -> Result<()> {
-    let Some(turn) = state.receipt_drains.begin(conversation_id) else {
-        // A drain is running here; it goes round again for whatever this one would send.
-        return Ok(());
-    };
-    let mut unrecorded = unrecorded;
-    loop {
-        drain_once(state, user_id, conversation_id, unrecorded).await?;
-        unrecorded = &[];
-        if !turn.again() {
-            return Ok(());
-        }
-    }
+    run_drain(&state.receipt_drains, conversation_id, unrecorded, |ids| async move {
+        drain_once(state, user_id, conversation_id, &ids).await
+    })
+    .await
 }
 
 /// Send what every conversation owes: the outbox drain's share (unlock, reconnect, resume).
@@ -375,11 +491,13 @@ async fn drain_once(
         if owed_table_exists(db.conn()) {
             (true, owed_batches_on(db.conn(), conversation_id)?)
         } else {
+            // Stored by the caller's pass just now: now is their store time.
+            let at = super::envelope_sent_at();
             let batches = unrecorded
                 .chunks(MAX_IDS_PER_RECEIPT)
                 .map(|ids| OwedBatch {
                     kind: ReceiptKind::Delivered,
-                    read_at: None,
+                    at: at.clone(),
                     message_ids: ids.to_vec(),
                 })
                 .collect();
@@ -403,26 +521,67 @@ async fn drain_once(
         }
         return Ok(());
     }
+    send_frames(&state.local_db, conversation_id, recorded, batches, |batch| async move {
+        deliver_batch(state, user_id, conversation_id, &batch).await
+    })
+    .await
+}
+
+/// What a frame's attempt means for the rows it carried.
+#[derive(Debug, PartialEq, Eq)]
+enum Settle {
+    /// Clear this frame's rows and send the next: it landed, or the DS refused this envelope in
+    /// a way no retry fixes (#1335's rule). Every other frame is still owed.
+    Frame,
+    /// Clear everything the conversation owes and stop: no receipt may be sent for any of it
+    /// (the opt-out, or this device is not a member).
+    All,
+}
+
+fn settlement(conversation_id: &str, attempt: Result<Sent>) -> Result<Settle> {
+    match attempt {
+        Ok(Sent::Landed) => Ok(Settle::Frame),
+        Ok(Sent::OptedOut) => Ok(Settle::All),
+        Err(e) if super::outbox::is_not_a_member(&e) => Ok(Settle::All),
+        Err(e) if super::outbox::is_permanent(&e) => {
+            crate::diag!("[receipts] a receipt frame for {conversation_id} refused for good: {e}");
+            Ok(Settle::Frame)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Send `batches` one frame at a time through `deliver`, clearing (when `recorded`) only the
+/// rows each attempt settles. A failure no retry fixes costs its own frame and no other; any
+/// other failure stops here with everything unsent still owed.
+async fn send_frames<D, Fut>(
+    local_db: &tokio::sync::Mutex<Option<crate::db::local::LocalDb>>,
+    conversation_id: &str,
+    recorded: bool,
+    batches: Vec<OwedBatch>,
+    mut deliver: D,
+) -> Result<()>
+where
+    D: FnMut(OwedBatch) -> Fut,
+    Fut: std::future::Future<Output = Result<Sent>>,
+{
     for batch in batches {
-        let sent = match deliver_batch(state, user_id, conversation_id, &batch).await {
-            Ok(sent) => sent,
-            // A refusal no retry fixes (#1335's rule): these can never go.
-            Err(e) if super::outbox::is_permanent(&e) => {
-                crate::diag!("[receipts] receipts for {conversation_id} refused for good: {e}");
-                Sent::OptedOut
-            }
-            Err(e) => return Err(e),
-        };
+        let rows = batch.clone();
+        let settle = settlement(conversation_id, deliver(batch).await)?;
         if !recorded {
+            if settle == Settle::All {
+                return Ok(());
+            }
             continue;
         }
-        match sent {
-            Sent::Landed => {
-                super::with_local_conn(state, |conn| settle_owed_on(conn, conversation_id, &batch))
-                    .await?
-            }
-            Sent::OptedOut => {
-                super::with_local_conn(state, |conn| forget_owed_on(conn, conversation_id)).await?;
+        let guard = local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+        match settle {
+            Settle::Frame => settle_owed_on(db.conn(), conversation_id, &rows)?,
+            Settle::All => {
+                forget_owed_on(db.conn(), conversation_id)?;
                 return Ok(());
             }
         }
@@ -445,12 +604,8 @@ async fn deliver_batch(
             "locked: no delete capability for the receipt envelope"
         )));
     };
-    // A delivered receipt is stamped now; a read one carries the reader's own time (#2140).
-    let at = batch
-        .read_at
-        .clone()
-        .unwrap_or_else(super::envelope_sent_at);
-    let plaintext = super::framing::pad_receipt(batch.kind, &at, &batch.message_ids);
+    // The time the rows were owed with: the store time, or the reader's own (#2140).
+    let plaintext = super::framing::pad_receipt(batch.kind, &batch.at, &batch.message_ids);
     // A DM's MLS group is keyed by the conversation id directly. The opt-out is read under the
     // same lock as the seal, so the decision and the act cannot straddle a preference change.
     let sealed = super::seal::with_sealing_lock(state, conversation_id, |conn, held| {
@@ -833,45 +988,56 @@ mod tests {
         assert_eq!(at, "t-first");
     }
 
-    fn owed_rows(conn: &rusqlite::Connection) -> Vec<(String, String, String, Option<String>)> {
+    fn owed_rows(conn: &rusqlite::Connection) -> Vec<(String, String, String)> {
         let mut stmt = conn
             .prepare(
-                "SELECT conversation_id, message_id, kind, read_at FROM receipt_owed
+                "SELECT conversation_id, message_id, kind FROM receipt_owed
                  ORDER BY conversation_id, kind, message_id",
             )
             .unwrap();
-        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .unwrap()
             .map(|r| r.unwrap())
             .collect()
     }
 
-    /// An owed read receipt always has the reader's time and a delivered one never does: the
-    /// table refuses either shape, so a frame can never go out with no time or a wrong one.
+    fn owed_at(conn: &rusqlite::Connection, kind: &str, message_id: &str) -> String {
+        conn.query_row(
+            "SELECT at FROM receipt_owed WHERE kind = ?1 AND message_id = ?2",
+            rusqlite::params![kind, message_id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    /// Every owed receipt carries the time it states, and only the two real kinds exist: the
+    /// table refuses anything else, so a frame can never go out with no time.
     #[test]
     fn an_owed_receipt_without_its_time_is_unrepresentable() {
         let db = db();
-        for (kind, read_at) in [("read", None), ("delivered", Some("t0")), ("seen-ish", None)] {
+        for (kind, at) in [("read", None), ("delivered", None), ("seen-ish", Some("t0"))] {
             let err = db.conn().execute(
-                "INSERT INTO receipt_owed (conversation_id, message_id, kind, read_at)
+                "INSERT INTO receipt_owed (conversation_id, message_id, kind, at)
                  VALUES ('dm1', 'm1', ?1, ?2)",
-                rusqlite::params![kind, read_at],
+                rusqlite::params![kind, at],
             );
-            assert!(err.is_err(), "{kind} with read_at {read_at:?} must not be storable");
+            assert!(err.is_err(), "{kind} at {at:?} must not be storable");
         }
     }
 
-    /// A stored message owes its delivered receipt once, whatever re-stores it; the opt-out owes
-    /// nothing.
+    /// A stored message owes its delivered receipt once, whatever re-stores it, stamped when it
+    /// was stored; the opt-out owes nothing.
     #[test]
     fn a_delivered_receipt_is_owed_once_and_not_while_opted_out() {
         let db = db();
+        let before = super::super::envelope_sent_at();
         owe_delivered_on(db.conn(), "dm1", "m1");
+        let stored_at = owed_at(db.conn(), "delivered", "m1");
         owe_delivered_on(db.conn(), "dm1", "m1");
-        assert_eq!(
-            owed_rows(db.conn()),
-            vec![("dm1".into(), "m1".into(), "delivered".into(), None)]
-        );
+        assert_eq!(owed_rows(db.conn()), vec![("dm1".into(), "m1".into(), "delivered".into())]);
+        assert_eq!(owed_at(db.conn(), "delivered", "m1"), stored_at, "a re-store keeps the first time");
+        let parse = |t: &str| chrono::DateTime::parse_from_rfc3339(t).unwrap();
+        assert!(parse(&stored_at) >= parse(&before), "stamped at the store");
         set_pref(db.conn(), r#"{"send_read_receipts":false}"#);
         owe_delivered_on(db.conn(), "dm1", "m2");
         owe_read_on(db.conn(), "dm1", &["m1".to_string()], "t1").unwrap();
@@ -894,7 +1060,10 @@ mod tests {
         let batches = owed_batches_on(db.conn(), "dm1").unwrap();
         let shape: Vec<(ReceiptKind, Option<&str>, usize)> = batches
             .iter()
-            .map(|b| (b.kind, b.read_at.as_deref(), b.message_ids.len()))
+            .map(|b| {
+                let read_at = (b.kind == ReceiptKind::Read).then_some(b.at.as_str());
+                (b.kind, read_at, b.message_ids.len())
+            })
             .collect();
         assert_eq!(
             shape,
@@ -909,36 +1078,227 @@ mod tests {
         settle_owed_on(db.conn(), "dm1", &batches[2]).unwrap();
         let left = owed_batches_on(db.conn(), "dm1").unwrap();
         assert_eq!(left.len(), 3, "only the landed frame's rows are cleared");
-        assert!(left.iter().all(|b| b.read_at.as_deref() != Some("t-early")));
+        assert!(left.iter().all(|b| b.at != "t-early"));
 
         forget_owed_on(db.conn(), "dm1").unwrap();
         assert!(owed_batches_on(db.conn(), "dm1").unwrap().is_empty());
         assert_eq!(owed_batches_on(db.conn(), "dm2").unwrap().len(), 1, "other DMs untouched");
     }
 
-    /// A database the app has not opened since the upgrade (an extension's open) has no table:
-    /// storing a message still works, and nothing claims to be owed.
+    /// A delivered frame states when the messages were stored, not when a later drain sealed it:
+    /// the latest store time among its ids, the first instant this device held all of them.
     #[test]
-    fn a_database_without_the_table_still_stores_and_owes_nothing() {
+    fn a_delivered_frame_states_the_store_time_not_the_seal_time() {
+        let db = db();
+        for (id, at) in [("m1", "2026-11-01T10:00:00+00:00"), ("m2", "2026-11-01T10:05:00+00:00")] {
+            db.conn()
+                .execute(
+                    "INSERT INTO receipt_owed (conversation_id, message_id, kind, at)
+                     VALUES ('dm1', ?1, 'delivered', ?2)",
+                    rusqlite::params![id, at],
+                )
+                .unwrap();
+        }
+        let batches = owed_batches_on(db.conn(), "dm1").unwrap();
+        assert_eq!(
+            batches,
+            vec![OwedBatch {
+                kind: ReceiptKind::Delivered,
+                at: "2026-11-01T10:05:00+00:00".into(),
+                message_ids: vec!["m1".into(), "m2".into()],
+            }],
+            "a drain days later still states the store time",
+        );
+    }
+
+    /// A database whose open could not create the table (an extension's open that met a busy
+    /// file): the store creates it, inside its own savepoint, and the receipt is owed.
+    #[test]
+    fn a_store_on_a_database_without_the_table_still_owes_its_receipt() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::local::apply_local_schema(&conn).unwrap();
         assert!(!owed_table_exists(&conn));
+        conn.execute_batch("SAVEPOINT store").unwrap();
         owe_delivered_on(&conn, "dm1", "m1");
+        conn.execute_batch("RELEASE store").unwrap();
+        assert!(owed_table_exists(&conn));
+        assert_eq!(owed_rows(&conn), vec![("dm1".into(), "m1".into(), "delivered".into())]);
+    }
+
+    /// The unreleased first shape (#2200) is rebuilt in place, keeping every owed row: a read
+    /// keeps its reader's time, a delivered one gets one.
+    #[test]
+    fn the_first_shape_is_rebuilt_without_losing_a_row() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::local::apply_local_schema(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE receipt_owed (
+                conversation_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK (kind IN ('delivered', 'read')),
+                read_at TEXT,
+                CHECK ((kind = 'read') = (read_at IS NOT NULL)),
+                PRIMARY KEY (conversation_id, kind, message_id)
+            ) WITHOUT ROWID;
+            INSERT INTO receipt_owed VALUES ('dm1', 'm1', 'delivered', NULL);
+            INSERT INTO receipt_owed VALUES ('dm1', 'm2', 'read', 't-read');",
+        )
+        .unwrap();
         assert!(!owed_table_exists(&conn));
+        ensure_receipt_owed(&conn).unwrap();
+        assert!(owed_table_exists(&conn));
+        assert_eq!(
+            owed_rows(&conn),
+            vec![
+                ("dm1".into(), "m1".into(), "delivered".into()),
+                ("dm1".into(), "m2".into(), "read".into()),
+            ]
+        );
+        assert_eq!(owed_at(&conn, "read", "m2"), "t-read");
+        assert!(!owed_at(&conn, "delivered", "m1").is_empty());
+        // Idempotent: a second open finds it current.
+        ensure_receipt_owed(&conn).unwrap();
+        assert_eq!(owed_rows(&conn).len(), 2);
+    }
+
+    /// A DS refusal no retry fixes, as `submit` returns it.
+    fn refused(status: u16) -> Error {
+        Error::Other(anyhow::Error::new(crate::commands::mls::ds_client::DsRefused {
+            label: "envelope".into(),
+            path: "/v1/envelopes".into(),
+            status: reqwest::StatusCode::from_u16(status).unwrap(),
+            body: String::new(),
+        }))
+    }
+
+    /// One frame refused for good costs that frame and no other: the next is still sent, and
+    /// a frame a transient failure stopped stays owed.
+    #[tokio::test]
+    async fn a_refused_frame_clears_only_its_own_rows() {
+        let db = db();
+        owe_delivered_on(db.conn(), "dm1", "m1");
+        owe_read_on(db.conn(), "dm1", &["m1".to_string()], "t-early").unwrap();
+        owe_read_on(db.conn(), "dm1", &["m2".to_string()], "t-late").unwrap();
+        let batches = owed_batches_on(db.conn(), "dm1").unwrap();
+        assert_eq!(batches.len(), 3);
+        let local_db = tokio::sync::Mutex::new(Some(db));
+
+        let attempted = std::sync::Mutex::new(Vec::new());
+        let result = send_frames(&local_db, "dm1", true, batches, |batch| {
+            let n = {
+                let mut attempted = attempted.lock().unwrap();
+                attempted.push(batch.at.clone());
+                attempted.len()
+            };
+            async move {
+                match n {
+                    1 => Err(refused(403)),
+                    2 => Ok(Sent::Landed),
+                    _ => Err(Error::Other(anyhow::anyhow!("network down"))),
+                }
+            }
+        })
+        .await;
+        assert!(result.is_err(), "the transient failure is reported");
+        let attempted = attempted.into_inner().unwrap();
+        assert_eq!(attempted.len(), 3, "the frames after the refused one were still sent: {attempted:?}");
+
+        let guard = local_db.lock().await;
+        let conn = guard.as_ref().unwrap().conn();
+        assert_eq!(
+            owed_rows(conn),
+            vec![("dm1".into(), "m2".into(), "read".into())],
+            "the refused and the landed frame are cleared; the one that failed is still owed",
+        );
+    }
+
+    /// Not a member, or the opt-out: nothing in the conversation may be sent, so all of it goes.
+    #[tokio::test]
+    async fn not_a_member_or_the_opt_out_clears_the_conversation() {
+        let attempts: [fn() -> Result<Sent>; 2] =
+            [|| Err(super::super::outbox::not_a_member()), || Ok(Sent::OptedOut)];
+        for attempt in attempts {
+            let db = db();
+            owe_delivered_on(db.conn(), "dm1", "m1");
+            owe_read_on(db.conn(), "dm1", &["m1".to_string()], "t1").unwrap();
+            owe_delivered_on(db.conn(), "dm2", "m9");
+            let batches = owed_batches_on(db.conn(), "dm1").unwrap();
+            let local_db = tokio::sync::Mutex::new(Some(db));
+            let tries = std::sync::atomic::AtomicUsize::new(0);
+            send_frames(&local_db, "dm1", true, batches, |_| {
+                tries.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async move { attempt() }
+            })
+            .await
+            .unwrap();
+            assert_eq!(tries.into_inner(), 1, "nothing more is attempted");
+            let guard = local_db.lock().await;
+            assert_eq!(
+                owed_rows(guard.as_ref().unwrap().conn()),
+                vec![("dm2".into(), "m9".into(), "delivered".into())],
+                "only this conversation's rows are cleared",
+            );
+        }
     }
 
     /// A drain asked for while one runs does not start a second; the running one goes round
-    /// again, and the turn ends when it is dropped, however it ended.
+    /// again with the asker's ids, and the end is decided under the same lock as the request.
     #[test]
     fn a_drain_asked_for_while_one_runs_makes_it_go_round_again() {
         let drains = ReceiptDrains::default();
-        let turn = drains.begin("dm1").expect("the first drain runs");
-        assert!(drains.begin("dm1").is_none(), "a second drain never runs beside it");
-        assert!(drains.begin("dm2").is_some(), "other conversations drain freely");
-        assert!(turn.again(), "the request made meanwhile is not lost");
-        assert!(!turn.again(), "and is taken once");
+        let mut turn = drains.begin("dm1", &[]).expect("the first drain runs");
+        assert!(drains.begin("dm1", &["m2".to_string()]).is_none(), "a second drain never runs beside it");
+        assert!(drains.begin("dm2", &[]).is_some(), "other conversations drain freely");
+        assert_eq!(turn.next_round(), Some(vec!["m2".to_string()]), "the request and its ids are kept");
+        assert_eq!(turn.next_round(), None, "taken once; the drain ends");
+        let next = drains.begin("dm1", &[]);
+        assert!(next.is_some(), "an ended drain frees the conversation");
         drop(turn);
-        assert!(drains.begin("dm1").is_some(), "a dropped turn frees the conversation");
+        assert!(drains.begin("dm1", &[]).is_none(), "and dropping it later frees nothing it no longer holds");
+        drop(next);
+        assert!(drains.begin("dm1", &[]).is_some(), "a dropped turn frees the conversation");
+    }
+
+    /// A request folded into a drain whose round then fails is not lost: the drain goes round
+    /// again for it, with its ids, as the asker's own drain would have.
+    #[tokio::test]
+    async fn a_request_folded_into_a_failing_drain_still_runs() {
+        let drains = ReceiptDrains::default();
+        let rounds = std::sync::Mutex::new(Vec::<Vec<String>>::new());
+        let result = run_drain(&drains, "dm1", &["m1".to_string()], |ids| {
+            let first = {
+                let mut rounds = rounds.lock().unwrap();
+                rounds.push(ids);
+                rounds.len() == 1
+            };
+            if first {
+                // Another pass stores m2 and asks for a drain while this round runs.
+                assert!(drains.begin("dm1", &["m2".to_string()]).is_none());
+            }
+            async move {
+                if first {
+                    Err(Error::Other(anyhow::anyhow!("epoch moved; not sent yet")))
+                } else {
+                    Ok(())
+                }
+            }
+        })
+        .await;
+        assert!(result.is_ok(), "the last round's result: {result:?}");
+        assert_eq!(
+            rounds.into_inner().unwrap(),
+            vec![vec!["m1".to_string()], vec!["m2".to_string()]],
+            "the folded request ran after the failed round",
+        );
+        assert!(drains.begin("dm1", &[]).is_some(), "the drain ended");
+
+        // With nothing folded in, the failure is the caller's to log, and the turn is freed.
+        let failed = run_drain(&drains, "dm3", &[], |_| async {
+            Err(Error::Other(anyhow::anyhow!("network down")))
+        })
+        .await;
+        assert!(failed.is_err());
+        assert!(drains.begin("dm3", &[]).is_some());
     }
 
     /// The read time is the read receipt's own timestamp, one per reader, and only for readers
