@@ -29,7 +29,7 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - `expo-image` (caching, and the blurhash placeholders — there is no separate blurhash package)
 - `@livekit/react-native-webrtc` pinned to `144.1.2` + `@livekit/react-native-expo-plugin` `^1.0.3` (installed for #343, not wired — see "Voice")
 - `lucide-react-native` icons, wrapped in `components/icons.tsx` (stable `Icon.*` API, strokeWidth pinned to 1.75 — `ICON_STROKE`), one deep import per icon (`lucide-react-native/icons/<file>`), never the barrel, which bundles and builds all ~1,800 (#2187; `tests/lucide-deep-imports.test.ts`, `scripts/lucide-deep-imports.mjs` rewrites one). `react-native-svg` is still used directly for the Initializing dot-field.
-- Geist (UI, the desktop Modern skin's face) via `@expo-google-fonts/geist`, one family name per weight (`fonts.regular/medium/semibold/bold`; never pair with `fontWeight`). Monospace (crypto material, e.g. the enrollment approval code) uses the **system** mono face — `fonts.mono*` = `Platform.select({ ios: 'Menlo', android: 'monospace' })`, no bundled font.
+- Geist (UI, the desktop Modern skin's face) via `@expo-google-fonts/geist`, imported per weight (`@expo-google-fonts/geist/400Regular`, …; the package index requires all 18 TTFs, #2188), one family name per weight (`fonts.regular/medium/semibold/bold`; never pair with `fontWeight`). Monospace (crypto material, e.g. the enrollment approval code) uses the **system** mono face — `fonts.mono*` = `Platform.select({ ios: 'Menlo', android: 'monospace' })`, no bundled font.
 - Rust core via `pollis-native` Turbo Module (uniffi-bindgen-react-native)
 
 ## Tests
@@ -118,7 +118,10 @@ Rules that are easy to get wrong here:
   that encode direction (`back`, `fwd`, the arrows).
 - **Emoji search is localized** through the CLDR annotations the generator
   emits under `components/emoji/annotations/` (#901); `useEmojiAnnotations`
-  loads the active locale's table and English's.
+  loads the active locale's table and English's. Only English is a module; every
+  other table is a `<lang>.emojitable` asset (`assetExts` in `metro.config.js`, never
+  `json`), read by `components/emoji/emojiTableAsset.ts`, so the Hermes bundle and
+  each OTA carry none of them (#2188). A failed read leaves English.
 
 Adding a locale: follow the desktop README, then add the same row to
 `mobile/i18n/languages.ts` and run `node scripts/mobile-i18n-resources.mjs`.

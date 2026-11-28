@@ -6,10 +6,13 @@
 //
 //     python3 scripts/generate-emoji-data.py --refresh-annotations
 //
-// Each locale is its own module behind a dynamic import. In the web bundle that
-// is a separate chunk (the picker needs the active locale's table and English's,
-// never all of them); on native, where Metro does not split, every locale ships
-// in the binary and the import only defers parsing until the picker opens.
+// English is a module in the bundle: the instant fallback. Every other locale is a
+// content-addressed asset, `<locale>.emojitable` (JSON rows), read when the picker
+// first needs it (#2188): Metro does not split, so a module per locale put every
+// table in the Hermes bundle and every OTA re-sent them all. A read that fails or
+// stalls rejects (`readEmojiTable` bounds it), which leaves English results only.
+
+import { readEmojiTable } from "../emojiTableAsset.ts";
 
 /** `[char, localized name, `|`-joined lowercase keywords]`. */
 export type EmojiAnnotationRow = readonly [
@@ -46,61 +49,61 @@ export const EMOJI_ANNOTATION_LOCALES: readonly string[] = [
   "zu",
 ];
 
-/** The rows for `locale`, or null when no table ships for it. */
+/** The rows for `locale`, or null when no table ships for it. Never throws. */
 export function loadEmojiAnnotationRows(
   locale: string,
 ): Promise<readonly EmojiAnnotationRow[]> | null {
   switch (locale) {
     case "am":
-      return import("./am").then((m) => m.default);
+      return readEmojiTable(() => require("./am.emojitable"));
     case "ar":
-      return import("./ar").then((m) => m.default);
+      return readEmojiTable(() => require("./ar.emojitable"));
     case "bn":
-      return import("./bn").then((m) => m.default);
+      return readEmojiTable(() => require("./bn.emojitable"));
     case "en":
       return import("./en").then((m) => m.default);
     case "es":
-      return import("./es").then((m) => m.default);
+      return readEmojiTable(() => require("./es.emojitable"));
     case "fa":
-      return import("./fa").then((m) => m.default);
+      return readEmojiTable(() => require("./fa.emojitable"));
     case "fr":
-      return import("./fr").then((m) => m.default);
+      return readEmojiTable(() => require("./fr.emojitable"));
     case "ha":
-      return import("./ha").then((m) => m.default);
+      return readEmojiTable(() => require("./ha.emojitable"));
     case "hi":
-      return import("./hi").then((m) => m.default);
+      return readEmojiTable(() => require("./hi.emojitable"));
     case "ja":
-      return import("./ja").then((m) => m.default);
+      return readEmojiTable(() => require("./ja.emojitable"));
     case "ko":
-      return import("./ko").then((m) => m.default);
+      return readEmojiTable(() => require("./ko.emojitable"));
     case "mr":
-      return import("./mr").then((m) => m.default);
+      return readEmojiTable(() => require("./mr.emojitable"));
     case "pa-Arab":
-      return import("./pa-Arab").then((m) => m.default);
+      return readEmojiTable(() => require("./pa-Arab.emojitable"));
     case "pa-Guru":
-      return import("./pa-Guru").then((m) => m.default);
+      return readEmojiTable(() => require("./pa-Guru.emojitable"));
     case "ps":
-      return import("./ps").then((m) => m.default);
+      return readEmojiTable(() => require("./ps.emojitable"));
     case "pt":
-      return import("./pt").then((m) => m.default);
+      return readEmojiTable(() => require("./pt.emojitable"));
     case "ru":
-      return import("./ru").then((m) => m.default);
+      return readEmojiTable(() => require("./ru.emojitable"));
     case "sw":
-      return import("./sw").then((m) => m.default);
+      return readEmojiTable(() => require("./sw.emojitable"));
     case "ta":
-      return import("./ta").then((m) => m.default);
+      return readEmojiTable(() => require("./ta.emojitable"));
     case "te":
-      return import("./te").then((m) => m.default);
+      return readEmojiTable(() => require("./te.emojitable"));
     case "uk":
-      return import("./uk").then((m) => m.default);
+      return readEmojiTable(() => require("./uk.emojitable"));
     case "ur":
-      return import("./ur").then((m) => m.default);
+      return readEmojiTable(() => require("./ur.emojitable"));
     case "yo":
-      return import("./yo").then((m) => m.default);
+      return readEmojiTable(() => require("./yo.emojitable"));
     case "zh":
-      return import("./zh").then((m) => m.default);
+      return readEmojiTable(() => require("./zh.emojitable"));
     case "zu":
-      return import("./zu").then((m) => m.default);
+      return readEmojiTable(() => require("./zu.emojitable"));
     default:
       return null;
   }

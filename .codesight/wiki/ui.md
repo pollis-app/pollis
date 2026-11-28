@@ -1162,8 +1162,20 @@ user. Cell labels and the preview strip show the locale's CLDR name
 
 Adding a locale to `i18n/languages.ts` and re-running the generator with
 `--refresh-annotations` is the whole procedure; the unit test fails if the two
-lists drift or a table stops covering the full set. Mobile has no localization
-yet and gets no annotation modules.
+lists drift or a table stops covering the full set.
+
+Mobile shares the tables, in another shape (#2188). Metro does not split, so a module
+per locale put every table (~4.7 MB) in the Hermes bundle and every OTA re-sent them.
+Under `mobile/components/emoji/annotations/` only English is a module (`en.ts`, the
+instant fallback); every other locale is `<lang>.emojitable`, the same rows as JSON,
+which `metro.config.js` lists in `assetExts` (a distinct extension, never `json`, which
+would turn the translation catalogues into assets too). The generated `index.ts` reads
+one through `components/emoji/emojiTableAsset.ts` (expo-asset + expo-file-system, bounded
+by a 5 s timeout) when the picker first needs it; assets are keyed by content, so an OTA
+re-sends only a table that changed. A read that fails or stalls rejects, and
+`useEmojiAnnotations` (still the byte copy of desktop's) keeps English and tries again on
+the next open. `mobile/tests/emoji-table-assets.test.ts` pins the layout, the rows against
+desktop's and the English fallback.
 
 ### The composer is a `contentEditable`, not a `<textarea>`
 

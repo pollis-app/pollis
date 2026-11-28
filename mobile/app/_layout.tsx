@@ -6,15 +6,15 @@ import * as SplashScreen from "expo-splash-screen";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
-import {
-  useFonts,
-  Geist_400Regular,
-  Geist_500Medium,
-  Geist_600SemiBold,
-  Geist_700Bold,
-  Geist_400Regular_Italic,
-  Geist_600SemiBold_Italic,
-} from "@expo-google-fonts/geist";
+// Per-weight entry points (#2188): the package index requires all 18 TTFs, so Metro bundled
+// every one into the store binary for the six the app registers.
+import { useFonts } from "@expo-google-fonts/geist/useFonts";
+import { Geist_400Regular } from "@expo-google-fonts/geist/400Regular";
+import { Geist_500Medium } from "@expo-google-fonts/geist/500Medium";
+import { Geist_600SemiBold } from "@expo-google-fonts/geist/600SemiBold";
+import { Geist_700Bold } from "@expo-google-fonts/geist/700Bold";
+import { Geist_400Regular_Italic } from "@expo-google-fonts/geist/400Regular_Italic";
+import { Geist_600SemiBold_Italic } from "@expo-google-fonts/geist/600SemiBold_Italic";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
 import { semantic } from "../theme/tokens";

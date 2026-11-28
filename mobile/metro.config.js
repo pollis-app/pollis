@@ -7,6 +7,12 @@ const path = require("node:path");
 
 const config = getDefaultConfig(__dirname);
 
+// The emoji picker's non-English annotation tables (#2188) ship as assets, not modules: Metro
+// does not split, so as modules they were all in the Hermes bundle and every OTA re-sent them.
+// A distinct extension, never `json`, which would turn every JSON import (the translation
+// catalogues among them) into an asset.
+config.resolver.assetExts = [...config.resolver.assetExts, "emojitable"];
+
 config.watchFolders = [
   ...(config.watchFolders ?? []),
   path.resolve(__dirname, "../frontend/src/i18n/locales"),
