@@ -252,12 +252,16 @@ pub fn catch_up_mls_group_interleaved<'a>(
     catch_up_interleaved(state, mls_group_id, user_id, None)
 }
 
-/// A catch-up read made before a seal (#2141), with the [`PassClock`] reading taken before it.
+/// A catch-up read made before a seal (#2141), with the [`PassClock`] reading and the
+/// [`ReadMark`] taken before it.
 ///
 /// [`PassClock`]: super::ingest_guard::PassClock
+/// [`ReadMark`]: super::ingest_guard::ReadMark
 pub struct PrefetchedCatchUp {
     pub response: pollis_api::directory::CatchUpResponse,
     pub clock: Option<u64>,
+    /// The catch-up requests this read answers for: those made before it was sent.
+    pub mark: super::ingest_guard::ReadMark,
 }
 
 /// [`catch_up_mls_group_interleaved`] applying `fetched` instead of reading again (#2141): one
@@ -300,9 +304,9 @@ async fn catch_up_interleaved(
     // Boxed: the largest future on the receive path (#1571 overflowed a test stack).
     // Single-flight per group (#1629): an overlapping pass would open the same envelopes again.
     let flights = &state.catch_up_flights;
-    let once = || {
+    let once = |mark| {
         let prefetched = fetched.lock().unwrap_or_else(|e| e.into_inner()).take();
-        Box::pin(catch_up_once(state, mls_group_id, user_id, prefetched))
+        Box::pin(catch_up_once(state, mls_group_id, user_id, prefetched, mark))
     };
     super::ingest_guard::coalesced(flights, mls_group_id, once).await?;
     // A pass that started with no group could only join; run one more pass now (#1571) to show what it holds.
@@ -322,12 +326,15 @@ async fn catch_up_interleaved(
     Ok(())
 }
 
+/// One catch-up pass. `mark` is what a read this pass sends itself answers for; the pass returns
+/// the mark of the read it applied, which is older when it applied one made before it began.
 async fn catch_up_once(
     state: &Arc<AppState>,
     mls_group_id: &str,
     user_id: &str,
     prefetched: Option<PrefetchedCatchUp>,
-) -> Result<()> {
+    mark: super::ingest_guard::ReadMark,
+) -> Result<super::ingest_guard::ReadMark> {
     // A read made before the seal is this pass's read when nothing moved since (#2141).
     let current = prefetched.filter(|p| {
         state.catch_up_clock.unchanged_since(p.clock)
@@ -338,13 +345,15 @@ async fn catch_up_once(
     let _pass = state.catch_up_clock.pass();
     let detach_tail = current.is_some();
     // One request lists the bound conversations and their envelopes past each watermark (#875, #987).
-    let resolved = match current {
-        Some(p) => p.response,
-        None => crate::commands::ds_reads::catch_up(state, mls_group_id, true, false).await?,
+    // A read made before the pass (a seal's, or a push fetch's) answers only for what was asked
+    // before it was sent; its own mark says so.
+    let (resolved, read) = match current {
+        Some(p) => (p.response, p.mark),
+        None => crate::commands::ds_reads::catch_up_envelopes(state, mls_group_id, mark).await?,
     };
     if !resolved.authorized {
         // Not a member (any more): nothing to do.
-        return Ok(());
+        return Ok(read);
     }
     let is_dm = resolved.kind == pollis_api::directory::ConversationKind::Dm;
     // The log head the DS read BEFORE it scanned the envelopes (#1041): the
@@ -433,7 +442,7 @@ async fn catch_up_once(
         crate::notify::scope::defer_or_run(tail).await;
     }
 
-    Ok(())
+    Ok(read)
 }
 
 /// Bucket one catch-up's envelopes per bound conversation, in the order the

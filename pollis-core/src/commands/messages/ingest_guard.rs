@@ -30,14 +30,44 @@ pub(crate) fn already_held(conn: &rusqlite::Connection, id: &str) -> bool {
 /// One group's catch-up bookkeeping for [`coalesced`].
 #[derive(Default)]
 pub struct CatchUpFlight {
-    /// Catch-ups asked for so far. Each caller takes the next number as its ticket.
-    requested: AtomicU64,
-    /// Held for a whole pass. Holds the highest ticket whose request a finished pass covered.
+    /// Held for a whole pass. Holds the highest ticket a finished pass's read answered for.
     covered: Mutex<u64>,
 }
 
-/// Every group's [`CatchUpFlight`], on the `AppState`.
-pub type CatchUpFlights = Arc<Mutex<HashMap<String, Arc<CatchUpFlight>>>>;
+/// Every group's [`CatchUpFlight`], and the request count they share.
+#[derive(Default)]
+pub struct FlightTable {
+    /// Catch-ups asked for so far, all groups together. Each caller takes the next number as
+    /// its ticket, and a read is marked with the count when it is sent ([`FlightTable::mark`]).
+    requested: AtomicU64,
+    groups: Mutex<HashMap<String, Arc<CatchUpFlight>>>,
+}
+
+/// The `AppState`'s [`FlightTable`].
+pub type CatchUpFlights = Arc<FlightTable>;
+
+/// The catch-up requests one read answers for: every request made before it was sent, and
+/// none made after. A pass covers exactly what the read it applied answers for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ReadMark(u64);
+
+impl FlightTable {
+    /// The mark for a read about to be sent. Take it before the request goes out: a request
+    /// made while the read is in flight must not count as answered by it.
+    pub(crate) fn mark(&self) -> ReadMark {
+        ReadMark(self.requested.load(Ordering::SeqCst))
+    }
+
+    /// Test only: the highest ticket `group`'s finished passes answered for.
+    #[cfg(test)]
+    async fn covered(&self, group: &str) -> u64 {
+        let flight = self.groups.lock().await.get(group).cloned();
+        match flight {
+            Some(flight) => *flight.covered.lock().await,
+            None => 0,
+        }
+    }
+}
 
 tokio::task_local! {
     /// The groups whose pass the current task is running, so a pass that re-enters its own
@@ -47,40 +77,59 @@ tokio::task_local! {
 
 /// Run `pass` for `group`, one pass at a time per group.
 ///
-/// A caller that arrives while a pass runs waits for it. It then runs a pass of its own only
-/// if no pass has started since it asked, because only a pass that started after its request
-/// can have fetched what it was asked to fetch. A burst of callers therefore costs at most one
-/// more pass. Nothing polls: callers wait on the group's lock.
+/// A caller that arrives while a pass runs waits for it. It then runs a pass of its own unless
+/// a finished pass already answered its request: one whose read was sent after the request was
+/// made. A burst of callers therefore costs at most one more pass. Nothing polls: callers wait
+/// on the group's lock.
+///
+/// `pass` gets the [`ReadMark`] of a read it sends itself and returns the mark of the read it
+/// applied. Usually that is the one it was given; a read made before the pass began (the
+/// pre-seal read, #2141, or a push fetch's prefetch, #1804) carries its own, older mark, so a
+/// request made after that read gets a pass of its own instead of being answered by it.
 pub(crate) async fn coalesced<F, Fut>(
     flights: &CatchUpFlights,
     group: &str,
     pass: F,
 ) -> crate::error::Result<()>
 where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = crate::error::Result<()>>,
+    F: FnOnce(ReadMark) -> Fut,
+    Fut: Future<Output = crate::error::Result<ReadMark>>,
 {
     if RUNNING.try_with(|running| running.contains(group)).unwrap_or(false) {
-        return pass().await;
+        return pass(flights.mark()).await.map(|_| ());
     }
     let flight = {
-        let mut map = flights.lock().await;
+        let mut map = flights.groups.lock().await;
         Arc::clone(map.entry(group.to_string()).or_default())
     };
-    let ticket = flight.requested.fetch_add(1, Ordering::SeqCst) + 1;
+    let ticket = flights.requested.fetch_add(1, Ordering::SeqCst) + 1;
+    // Test-harness only: a caller holding a ticket that must wait for a running pass parks
+    // first, so a test decides which waiter goes next.
+    #[cfg(feature = "test-harness")]
+    let mut covered = match flight.covered.try_lock() {
+        Ok(covered) => covered,
+        Err(_) => {
+            crate::commands::mls::rendezvous::park(
+                crate::commands::mls::rendezvous::Point::CatchUpWaiting,
+            )
+            .await;
+            flight.covered.lock().await
+        }
+    };
+    #[cfg(not(feature = "test-harness"))]
     let mut covered = flight.covered.lock().await;
     if *covered >= ticket {
         return Ok(());
     }
-    // Every request made up to here is covered by the pass that starts now.
-    let starting = flight.requested.load(Ordering::SeqCst);
+    // A read the pass sends from here on answers every request made up to now.
+    let starting = flights.mark();
     let mut running = RUNNING.try_with(Clone::clone).unwrap_or_default();
     running.insert(group.to_string());
-    let outcome = RUNNING.scope(running, pass()).await;
-    if outcome.is_ok() {
-        *covered = starting;
-    }
-    outcome
+    let applied = RUNNING.scope(running, pass(starting)).await?;
+    // Never more than the read the pass applied answers for, and never less than earlier
+    // passes already did.
+    *covered = (*covered).max(applied.min(starting).0);
+    Ok(())
 }
 
 /// Test-harness only: how many times each envelope reached a decrypt in this process.
@@ -150,21 +199,21 @@ mod tests {
     async fn overlapping_catch_ups_run_at_most_one_more_pass() {
         let flights: CatchUpFlights = Arc::default();
         let passes = Arc::new(AtomicUsize::new(0));
-        let pass = |passes: Arc<AtomicUsize>| async move {
+        let pass = |passes: Arc<AtomicUsize>, mark: ReadMark| async move {
             passes.fetch_add(1, Ordering::SeqCst);
             tokio::time::sleep(Duration::from_millis(50)).await;
-            Ok(())
+            Ok(mark)
         };
         let first = {
             let (flights, passes) = (flights.clone(), passes.clone());
-            tokio::spawn(async move { coalesced(&flights, "g", || pass(passes)).await })
+            tokio::spawn(async move { coalesced(&flights, "g", |m| pass(passes, m)).await })
         };
         // Let the first pass start, then pile up callers behind it.
         tokio::time::sleep(Duration::from_millis(10)).await;
         let waiters: Vec<_> = (0..5)
             .map(|_| {
                 let (flights, passes) = (flights.clone(), passes.clone());
-                tokio::spawn(async move { coalesced(&flights, "g", || pass(passes)).await })
+                tokio::spawn(async move { coalesced(&flights, "g", |m| pass(passes, m)).await })
             })
             .collect();
         first.await.unwrap().unwrap();
@@ -181,9 +230,9 @@ mod tests {
         let passes = Arc::new(AtomicUsize::new(0));
         for _ in 0..3 {
             let passes = passes.clone();
-            coalesced(&flights, "g", || async move {
+            coalesced(&flights, "g", |mark| async move {
                 passes.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+                Ok(mark)
             })
             .await
             .unwrap();
@@ -199,7 +248,7 @@ mod tests {
         let first = {
             let (flights, passes) = (flights.clone(), passes.clone());
             tokio::spawn(async move {
-                coalesced(&flights, "g", || async move {
+                coalesced(&flights, "g", |_| async move {
                     passes.fetch_add(1, Ordering::SeqCst);
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     Err(crate::error::Error::Other(anyhow::anyhow!("offline")))
@@ -209,9 +258,9 @@ mod tests {
         };
         tokio::time::sleep(Duration::from_millis(10)).await;
         let passes2 = passes.clone();
-        coalesced(&flights, "g", || async move {
+        coalesced(&flights, "g", |mark| async move {
             passes2.fetch_add(1, Ordering::SeqCst);
-            Ok(())
+            Ok(mark)
         })
         .await
         .unwrap();
@@ -227,12 +276,13 @@ mod tests {
         let (f2, ran) = (flights.clone(), inner_ran.clone());
         tokio::time::timeout(
             Duration::from_secs(5),
-            coalesced(&flights, "g", || async move {
-                coalesced(&f2, "g", || async move {
+            coalesced(&flights, "g", |mark| async move {
+                coalesced(&f2, "g", |inner| async move {
                     ran.fetch_add(1, Ordering::SeqCst);
-                    Ok(())
+                    Ok(inner)
                 })
                 .await
+                .map(|()| mark)
             }),
         )
         .await
@@ -249,9 +299,9 @@ mod tests {
         let a = {
             let flights = flights.clone();
             tokio::spawn(async move {
-                coalesced(&flights, "a", || async move {
+                coalesced(&flights, "a", |mark| async move {
                     rx.await.ok();
-                    Ok(())
+                    Ok(mark)
                 })
                 .await
             })
@@ -259,13 +309,30 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
         tokio::time::timeout(
             Duration::from_secs(5),
-            coalesced(&flights, "b", || async move { Ok(()) }),
+            coalesced(&flights, "b", |mark| async move { Ok(mark) }),
         )
         .await
         .expect("group b waited on group a")
         .unwrap();
         tx.send(()).unwrap();
         a.await.unwrap().unwrap();
+    }
+
+    /// A pass that applies a read made before some request answers for nothing after that
+    /// read: the flight records the read's mark, not the count when the pass began.
+    #[tokio::test]
+    async fn a_pass_covers_only_what_its_read_answers_for() {
+        let flights: CatchUpFlights = Arc::default();
+        // A read sent now, before anyone asks.
+        let early = flights.mark();
+        coalesced(&flights, "g", |_| async move { Ok(early) }).await.unwrap();
+        assert_eq!(flights.covered("g").await, early.0, "only what the early read answers for");
+        // A pass reading for itself covers every request made before it began.
+        coalesced(&flights, "g", |mark| async move { Ok(mark) }).await.unwrap();
+        assert_eq!(flights.covered("g").await, 2);
+        // An older read never takes coverage back.
+        coalesced(&flights, "g", |_| async move { Ok(early) }).await.unwrap();
+        assert_eq!(flights.covered("g").await, 2);
     }
 }
 

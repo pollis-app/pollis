@@ -87,8 +87,25 @@ pub(crate) async fn catch_up_before_seal(
     want_dm: bool,
 ) -> Result<crate::commands::messages::PrefetchedCatchUp> {
     let clock = state.catch_up_clock.now();
+    // Before the request goes out: a catch-up asked for while it is in flight is not answered by it.
+    let mark = state.catch_up_flights.mark();
     let response = post_catch_up(state, conversation_id, true, want_dm, false, true).await?;
-    Ok(crate::commands::messages::PrefetchedCatchUp { response, clock })
+    Ok(crate::commands::messages::PrefetchedCatchUp { response, clock, mark })
+}
+
+/// A catch-up pass's own read of its group's envelopes, and what it answers for: `mark`, the
+/// pass's own, for a read sent now; or a push fetch's prefetch (#1804), served once, with the
+/// older mark taken before that fetch went out. The only way a pass gets envelopes.
+pub(crate) async fn catch_up_envelopes(
+    state: &Arc<AppState>,
+    mls_group_id: &str,
+    mark: crate::commands::messages::ingest_guard::ReadMark,
+) -> Result<(dir::CatchUpResponse, crate::commands::messages::ingest_guard::ReadMark)> {
+    if let Some(prefetched) = crate::notify::scope::envelopes(mls_group_id) {
+        return Ok(prefetched);
+    }
+    let response = post_catch_up(state, mls_group_id, true, false, false, false).await?;
+    Ok((response, mark))
 }
 
 /// The MLS group behind `conversation_id` (#2141), from the memo every catch-up read fills, or
@@ -128,8 +145,9 @@ async fn post_catch_up(
     want_roster: bool,
     want_membership_version: bool,
 ) -> Result<dir::CatchUpResponse> {
-    // A push fetch's one-request prefetch (#1804); the roster and the pre-seal version are never prefetched.
-    if !want_roster && !want_membership_version {
+    // A push fetch's one-request prefetch (#1804); the roster and the pre-seal version are never
+    // prefetched, and its envelopes only through `catch_up_envelopes`, which carries their mark.
+    if !want_envelopes && !want_roster && !want_membership_version {
         if let Some(resp) = crate::notify::scope::catch_up(conversation_id, want_envelopes, want_dm) {
             return Ok(resp);
         }

@@ -146,6 +146,17 @@ impl DsFault {
 pub(crate) static NEXT_DS_FAULT: std::sync::Mutex<Option<DsFault>> =
     std::sync::Mutex::new(None);
 
+/// The next client parked at an armed rendezvous point, or a panic naming `what` after 30 s.
+pub(crate) async fn parked_at(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<pollis_core::commands::mls::rendezvous::Release>,
+    what: &str,
+) -> pollis_core::commands::mls::rendezvous::Release {
+    tokio::time::timeout(std::time::Duration::from_secs(30), rx.recv())
+        .await
+        .unwrap_or_else(|_| panic!("{what}"))
+        .expect("rendezvous closed")
+}
+
 /// One-shot: consumed the first time it applies.
 pub(crate) fn arm_ds_fault(fault: DsFault) {
     *NEXT_DS_FAULT.lock().expect("NEXT_DS_FAULT poisoned") = Some(fault);

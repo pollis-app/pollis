@@ -50,12 +50,17 @@ pub mod rendezvous {
         OutboxBeforeRow,
         /// A commit this device landed is merged; its key follow-ups have not run (#1937).
         AfterEpochAdvanced,
+        /// A catch-up replay holds the group's MLS lock and has read the local epoch it
+        /// replays from; no commit is fetched or applied yet.
+        ReplayStarted,
+        /// A catch-up caller holds its single-flight ticket and must wait for a running pass.
+        CatchUpWaiting,
     }
 
-    const POINTS: usize = 7;
+    const POINTS: usize = 9;
 
     static ARMED: Mutex<[Option<mpsc::UnboundedSender<Release>>; POINTS]> =
-        Mutex::new([None, None, None, None, None, None, None]);
+        Mutex::new([const { None }; POINTS]);
 
     /// Arm `point`: clients reaching it park and send a [`Release`] on the returned receiver.
     pub fn arm(point: Point) -> mpsc::UnboundedReceiver<Release> {
@@ -1424,6 +1429,9 @@ async fn process_one_generation<'h>(
             hook(db.conn(), generation, initial_epoch);
         }
     }
+    // Test-harness only: park a replay that holds the lock and knows the epoch it starts from.
+    #[cfg(feature = "test-harness")]
+    rendezvous::park(rendezvous::Point::ReplayStarted).await;
 
     // 2. Fetch this lineage's pending commits plus cross-signing rows for the users they hint at (#987).
     // The DS reads head and batch in ONE transaction and refuses a non-contiguous batch, which makes the gap handling below safe.

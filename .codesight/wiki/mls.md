@@ -547,8 +547,21 @@ finds (a `known_envelope` record, own or opened, or a real row; a placeholder
 does not count) before decrypting. `catch_up_mls_group_interleaved` runs its
 passes through `ingest_guard::coalesced`, which is single-flight per group: a
 caller that arrives during a pass waits for it, then runs a pass of its own
-only if none has started since it asked, so a burst costs at most one more
-pass. It is keyed on `AppState::catch_up_flights`, with no polling or timers.
+unless a finished pass already answered its request, so a burst costs at most
+one more pass. "Answered" means the read that pass applied was sent after the
+request was made. Every caller takes a ticket from one counter
+(`ingest_guard::FlightTable`, on `AppState::catch_up_flights`), every catch-up
+read is marked (`ReadMark`) with the counter as it stood just before the read
+went out, and a pass records as covered the mark of the read it applied, not
+the count when the pass began. A pass reading for itself covers everyone who
+asked before it started, as before. A pass applying a read made before it began
+(the pre-seal read, #2141, or a push fetch's prefetch, #1804) covers only the
+requests made before that read, so a wake that asked after it, for a message
+that read cannot hold, runs its own pass instead of returning with nothing
+fetched. No polling or timers. Test:
+`rich_push::a_wake_after_the_push_read_is_not_covered_by_the_push_pass` (fails
+when a pass covers by its start instead of its read), and
+`ingest_guard::tests::a_pass_covers_only_what_its_read_answers_for`.
 A pass that re-enters its own group's catch-up runs in place (a task-local
 records the groups the task is running), so it cannot wait on itself. What
 still logs is a real fault. `secret reuse` on an id this device never opened
@@ -1059,7 +1072,8 @@ the group, the membership version (#1874), the DM's members and the envelopes wi
 in a single `/v1/conversations/catch-up`, and hands that response to
 `catch_up_mls_group_interleaved_from`, which applies it exactly where the interleaved catch-up's
 own read used to be applied: after the Welcome poll, before the seal, under the per-group
-single-flight. It is used only if nothing changed this device's MLS state since it was read:
+single-flight, and covers only the catch-up requests made before it was sent (its `ReadMark`,
+see #1629 above). It is used only if nothing changed this device's MLS state since it was read:
 `AppState::catch_up_clock` (`ingest_guard::PassClock`) moves at the start and end of every catch-up
 pass and when a drain applies Welcomes, and a read taken while a pass ran or followed by one is
 dropped for a fresh read, as before. A pass that used it posts its watermarks and delivery

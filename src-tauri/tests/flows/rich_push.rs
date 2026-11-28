@@ -10,8 +10,8 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::harness::{
-    ds_request_mark, ds_requests_since, wipe, world, writable_remote, OldDeliveryService, TestClient,
-    TEST_PIN,
+    ds_request_mark, ds_requests_since, parked_at, wipe, world, writable_remote,
+    OldDeliveryService, TestClient, TEST_PIN,
 };
 use pollis_core::notify::escrow::{self, test_support, NotificationContent, ESCROW_SLOT};
 use pollis_core::notify::fetch::{self, Outcome, Params, Reason};
@@ -973,4 +973,78 @@ async fn a_group_push_names_the_sender_by_their_alias_in_that_group() {
     let out = headless(&bob, Some(handle_for(&bob_p.id, &general, "channel").await), Duration::from_secs(20)).await;
     let item = items(&out).into_iter().find(|i| i.body == "aliased hello").expect("decrypted");
     assert_eq!(item.sender_name, "Captain A", "{item:?}");
+}
+
+/// A settled DM for the push tests: bob's notifications show full content.
+async fn push_dm() -> (TestClient, TestClient, String) {
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    set_content(&bob, "full").await;
+    let dm = alice.create_dm(&[alice_p.id.as_str(), bob_p.id.as_str()]).await;
+    bob.accept_dm_request(&dm).await;
+    alice.fetch_dm_messages(&dm).await;
+    bob.fetch_dm_messages(&dm).await;
+    (alice, bob, dm)
+}
+
+/// `catch_up_mls_group_interleaved` for `client` in its own task.
+fn spawn_catch_up(client: &TestClient, dm: &str) -> tokio::task::JoinHandle<pollis_core::error::Result<()>> {
+    let state = client.state.clone();
+    let (dm, user) = (dm.to_string(), client.user_id().to_string());
+    tokio::spawn(async move {
+        pollis_core::commands::messages::catch_up_mls_group_interleaved(&state, &dm, &user).await
+    })
+}
+
+/// A push fetch's one request is read before its catch-up waits its turn. A wake that asks for
+/// a catch-up after that read is not answered by the pass that applies it: it gets a pass of
+/// its own, which fetches what arrived since.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_wake_after_the_push_read_is_not_covered_by_the_push_pass() {
+    use pollis_core::commands::mls::rendezvous::{self, Point};
+    let _mobile = MobileBuild::on();
+    let (alice, bob, dm) = push_dm().await;
+    bob.activate();
+
+    alice.send_channel_message(&dm, "first").await;
+
+    // A pass already running in the app, parked inside its replay.
+    let mut in_pass = rendezvous::arm(Point::ReplayStarted);
+    let running = spawn_catch_up(&bob, &dm);
+    let release_running = parked_at(&mut in_pass, "the running pass never started").await;
+    rendezvous::disarm(Point::ReplayStarted);
+
+    // The push reads "first" in its one request, then waits behind the running pass.
+    let mut waiting = rendezvous::arm(Point::CatchUpWaiting);
+    let push = {
+        let state = bob.state.clone();
+        let handle = handle_for(bob.user_id(), &dm, "dm").await;
+        tokio::spawn(async move { fetch::run_in_app(&state, Some(&handle), Duration::from_secs(30)).await })
+    };
+    let release_push = parked_at(&mut waiting, "the push never waited for the running pass").await;
+
+    // A message after the push's read, and its realtime wake, waiting too.
+    alice.send_channel_message(&dm, "second").await;
+    let wake = spawn_catch_up(&bob, &dm);
+    let release_wake = parked_at(&mut waiting, "the wake never waited for the running pass").await;
+    rendezvous::disarm(Point::CatchUpWaiting);
+
+    // The running pass ends; the push's pass goes next, then the wake.
+    let _ = release_running.send(());
+    running.await.expect("running task").expect("running pass");
+    let _ = release_push.send(());
+    push.await.expect("push task").expect("the app is unlocked in this process");
+    let _ = release_wake.send(());
+    wake.await.expect("wake task").expect("wake catch-up");
+
+    let stored = stored_contents(&bob).await;
+    assert!(
+        stored.contains(&"second".to_string()),
+        "the wake for \"second\" returned without fetching it: {stored:?}"
+    );
+    assert!(settle(Duration::from_secs(30)).await, "the deferred posts finished");
 }
