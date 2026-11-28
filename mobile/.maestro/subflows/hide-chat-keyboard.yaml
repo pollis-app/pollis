@@ -1,0 +1,21 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Close the chat composer's keyboard. Maestro's hideKeyboard cannot on the
+# iPad once the conversation fills its pane: the chat list never dismisses on
+# a drag (no keyboardDismissMode), and its fallbacks find no dismiss action.
+# There a tap on the "Today" divider does it: the list keeps
+# keyboardShouldPersistTaps="handled", so a tap no row handles dismisses.
+- runFlow:
+    when:
+      true: ${typeof IPAD === 'undefined' || IPAD != "1"}
+    commands:
+      - hideKeyboard
+- runFlow:
+    when:
+      true: ${typeof IPAD !== 'undefined' && IPAD == "1"}
+    commands:
+      - tapOn: "Today"
+      - extendedWaitUntil:
+          visible:
+            id: "keyboard-closed"
+          timeout: 5000

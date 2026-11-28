@@ -68,7 +68,7 @@ tags:
       - extendedWaitUntil:
           visible: ".*istory ${output.n},.*"
           timeout: 20000
-- hideKeyboard
+- runFlow: ../subflows/hide-chat-keyboard.yaml
 - assertVisible:
     id: "input-composer"
 - assertVisible:
@@ -101,7 +101,7 @@ tags:
 - extendedWaitUntil:
     visible: ".*after reopen.*"
     timeout: 15000
-- hideKeyboard
+- runFlow: ../subflows/hide-chat-keyboard.yaml
 - assertVisible:
     id: "input-composer"
 - takeScreenshot: long-history-02-after-send
