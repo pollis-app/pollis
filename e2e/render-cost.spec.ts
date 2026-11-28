@@ -289,6 +289,125 @@ for (const skin of SKINS) {
   });
 }
 
+// ---- Incoming message into a long log (#2167) --------------------------------
+
+// More rows than one page (50), so an arrival slides the page window the way the core's read does.
+const LONG_ROW_COUNT = 60;
+const INCOMING_ID = "01HQ7Z3K9M2P5R8T1V4W6Y1INC1";
+const longId = (i: number) => `01HQ7Z3K9M2P5R8T1V4W6Y1${String(i).padStart(3, "0")}`;
+// The newest row is our own, so its send state can change under the open log.
+const LONG_OWN_ID = longId(LONG_ROW_COUNT - 1);
+
+function longMessages(ownSendState?: "pending" | "failed") {
+  const out = [];
+  for (let i = 0; i < LONG_ROW_COUNT; i++) {
+    const own = i === LONG_ROW_COUNT - 1;
+    out.push({
+      id: longId(i),
+      conversation_id: CHANNEL_ID,
+      sender_id: own ? USER.id : "u-bob",
+      content: own ? "my own pending message" : `long-log message ${i}`,
+      sent_at: `2026-08-01T10:${String(i).padStart(2, "0")}:00.000Z`,
+      ...(own && ownSendState ? { send_state: ownSendState } : {}),
+    });
+  }
+  return out;
+}
+
+async function bootLongLog(page: Page, ownSendState?: "pending" | "failed") {
+  // The core reads the newest 50: the paged mock reproduces the sliding window.
+  const preload = { ...preloadState("modern"), paginate: true, messages: { [CHANNEL_ID]: longMessages(ownSendState) } };
+  await page.addInitScript((p) => {
+    (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = p;
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+      plugins: {},
+      transformCallback: () => 0,
+      convertFileSrc: (path: string) => path,
+      registerListener: () => {},
+      unregisterListener: () => {},
+      runCallback: () => {},
+      invoke: () => Promise.resolve(null),
+    };
+  }, preload);
+  await page.goto("/");
+  await expect(page.getByTestId("sidebar")).toBeVisible();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK");
+  await page.getByTestId("search-panel-input").fill("general");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId(`message-${LONG_OWN_ID}`)).toBeVisible();
+  await assertProbeLive(page);
+  await settleRenders(page);
+}
+
+/** Change the mock store, then invalidate the open page as a message wake does. */
+async function mutateAndInvalidate(page: Page, change: "arrival" | "fail" | "retry") {
+  await page.evaluate(
+    ({ channelId, incomingId, ownId, change }) => {
+      const w = window as unknown as {
+        __tauriMock: { messages: Record<string, Array<Record<string, unknown>>> };
+        __pollisQueryClient: { invalidateQueries: (f: unknown) => Promise<void> };
+      };
+      const rows = w.__tauriMock.messages[channelId];
+      if (change === "arrival") {
+        rows.push({
+          id: incomingId,
+          conversation_id: channelId,
+          sender_id: "u-bob",
+          content: "a fresh arrival",
+          sent_at: "2026-08-01T11:00:00.000Z",
+        });
+      } else {
+        const own = rows.find((r) => r.id === ownId)!;
+        own.send_state = change === "fail" ? "failed" : "pending";
+      }
+      void w.__pollisQueryClient.invalidateQueries({ queryKey: ["messages", "channel", channelId] });
+    },
+    { channelId: CHANNEL_ID, incomingId: INCOMING_ID, ownId: LONG_OWN_ID, change },
+  );
+}
+
+test.describe("long log render cost (#2167)", () => {
+  test("an arrival plus a log invalidation re-renders only the new row", async ({ page }) => {
+    await bootLongLog(page);
+    const mounted = await page.locator('[data-testid^="message-01HQ"]').count();
+    const rowsBefore = await renders(page, "MessageItem");
+
+    await mutateAndInvalidate(page, "arrival");
+    await expect(page.getByTestId(`message-${INCOMING_ID}`)).toBeVisible();
+    await settleRenders(page);
+
+    const delta = (await renders(page, "MessageItem")) - rowsBefore;
+    console.log(`[render-cost] mounted_rows=${mounted} MessageItem_delta=${delta}`);
+    // Only the new row: it commits twice (mount, then its follow-up data), each doubled by StrictMode.
+    // Re-rendering every mounted row costs ~2 per row (about 50 here).
+    expect(delta).toBeLessThanOrEqual(4);
+  });
+
+  test("a send that turns failed repaints its row with Retry, and a retry repaints it again", async ({ page }) => {
+    await bootLongLog(page, "pending");
+    const own = page.getByTestId(`message-${LONG_OWN_ID}`);
+    await expect(page.getByTestId(`message-retry-${LONG_OWN_ID}`)).toHaveCount(0);
+    const rowsBefore = await renders(page, "MessageItem");
+
+    // pending -> failed: the memoised row must not keep its "sending" render.
+    await mutateAndInvalidate(page, "fail");
+    await expect(page.getByTestId(`message-retry-${LONG_OWN_ID}`)).toBeVisible();
+    await expect(own).toContainText("my own pending message");
+    await settleRenders(page);
+    const afterFail = await renders(page, "MessageItem");
+    expect(afterFail).toBeGreaterThan(rowsBefore);
+    // Only that row repainted, not the log.
+    expect(afterFail - rowsBefore).toBeLessThanOrEqual(4);
+
+    // failed -> pending (a retry elsewhere): Retry goes away again.
+    await mutateAndInvalidate(page, "retry");
+    await expect(page.getByTestId(`message-retry-${LONG_OWN_ID}`)).toHaveCount(0);
+    await settleRenders(page);
+    expect(await renders(page, "MessageItem")).toBeGreaterThan(afterFail);
+  });
+});
+
 // ---- Voice stage ------------------------------------------------------------
 
 const VOICE_GROUP_ID = "01HQ7Z3K9M2P5R8T1V4W6Y1VGR";

@@ -1,5 +1,5 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
+import { useRowT } from "../../i18n/useRowT";
 import { X } from "lucide-react";
 import { IconButton } from "../ui/IconButton";
 import { FOCUS_RING } from "../ui/focusRing";
@@ -39,7 +39,7 @@ export const LinkPreviewCard: React.FC<LinkPreviewCardProps> = ({
   loading = false,
   testId,
 }) => {
-  const { t } = useTranslation("chat");
+  const t = useRowT("chat");
 
   const text = (
     <div className="flex min-w-0 flex-1 flex-col self-stretch">

@@ -1,6 +1,6 @@
 import { senderColorKey, senderName } from "../../utils/senderName";
 import React from "react";
-import { useTranslation } from "react-i18next";
+import { useRowT } from "../../i18n/useRowT";
 import { Reply, CornerUpLeft } from "lucide-react";
 import { ThreadReplyCount } from "./ThreadReplyCount";
 import { formatTimeOfDay, formatFullTimestamp, toMs } from "../../utils/format";
@@ -86,7 +86,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   isDm = false,
 }) => {
   probeRender("MessageItem");
-  const { t } = useTranslation("chat");
+  const t = useRowT("chat");
   const { skin, isLightBg, currentUserId } = ctx;
   if (message.undecryptable) {
     return <UndecryptableMessage message={message} skin={skin} />;

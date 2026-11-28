@@ -1,5 +1,5 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
+import { useRowT } from "../../i18n/useRowT";
 import { useNavigate } from "@tanstack/react-router";
 import { LockKeyhole } from "lucide-react";
 import { formatTimeOfDay, formatFullTimestamp, toMs } from "../../utils/format";
@@ -14,7 +14,7 @@ interface UndecryptableMessageProps {
 
 /** A message (or collapsed run) this device could not decrypt (#1312); links to Diagnostics. */
 export const UndecryptableMessage: React.FC<UndecryptableMessageProps> = ({ message, skin }) => {
-  const { t } = useTranslation("chat");
+  const t = useRowT("chat");
   const navigate = useNavigate();
   const at = toMs(message.created_at);
   const count = message.undecryptable_count ?? 1;

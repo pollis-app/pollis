@@ -1,5 +1,5 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
+import { useRowT } from "../../i18n/useRowT";
 import { SmilePlus } from "lucide-react";
 import { EmojiPickerButton } from "../Emoji/EmojiPickerButton";
 import { useToggleReaction } from "../../hooks/queries/useReactions";
@@ -19,7 +19,7 @@ export const ReactionAddButton: React.FC<ReactionAddButtonProps> = ({
   className,
   onOpenChange,
 }) => {
-  const { t } = useTranslation("chat");
+  const t = useRowT("chat");
   const toggleReaction = useToggleReaction(messageId);
 
   return (

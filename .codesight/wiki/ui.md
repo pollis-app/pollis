@@ -439,6 +439,31 @@ Concretely, in the message log:
   keystroke in the edit bar; unstable identities there re-render the entire log.
 - Reply targets are resolved once into a `Map` by `MessageList`, not with a
   `find()` per row.
+- **Row identity survives a refetch (#2167).** The live page is the newest 50, so an
+  arrival shifts every index, and React Query's default sharing (by index) gave every
+  row a new object and re-rendered the whole log on each message, edit, delete,
+  receipt or retry. `useMessages` sets `structuralSharing: shareMessagePage(...)`
+  (`utils/messageSharing.ts`): rows are matched **by id** and each is deep-compared
+  with `replaceEqualDeep`, so an unchanged row keeps its object and any changed field
+  (send state, `edit_unsent`, `edited_at`, `deleted_at`, decryption) gives it a new one.
+  Never replace that with an id-only or shallow check, or a custom `areEqual`: a row
+  that turned failed would keep its "sending" render and hide Retry. Two things keep
+  rows equal across reads: the transform (`utils/messageTransform.ts`) uses one shared
+  empty buffer for `ciphertext`/`nonce` and `uploaded_at: 0` on received references
+  (a fresh typed array or `Date.now()` is never equal). Identity reuse is only safe
+  while nothing mutates a cached row in place, so in development every cached row is
+  **frozen** and such a write throws; `tests/message-sharing.test.ts` pins both halves
+  and `render-cost.spec.ts` has the arrival and failed/retried-send cases.
+- **Row mount shares its setup (#2167).** Per-row components take `t` from
+  `useRowT(ns)` (`i18n/useRowT.ts`), one cached `getFixedT` per (language, namespace),
+  not `useTranslation`, which copies the i18next instance on every mount. It
+  re-renders on a language change and on any bundle added (a revision counter, so a
+  lazily loaded catalogue re-labels rows too). Use it only where the component needs
+  nothing but `t` (no `Trans`, `i18n` or `ready`). `utils/format.ts` caches one
+  `Intl.DateTimeFormat` per (locale, options) instead of a `toLocale*String` per call;
+  the cache clears on `languageChanged` and on window focus (a formatter keeps the time
+  zone it was built in).
+
 ### Voice stage and controls
 
 The voice UI is `components/Voice/stage/VoiceStage.tsx` (the channel/call screen),

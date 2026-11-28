@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useRowT } from "../../i18n/useRowT";
 import {
   Reply,
   Edit2,
@@ -62,7 +62,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   onDelete,
   onReport,
 }) => {
-  const { t } = useTranslation("chat");
+  const t = useRowT("chat");
   const [menuOpen, setMenuOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   // Opens up or down from the trigger's viewport position, chosen at open time.

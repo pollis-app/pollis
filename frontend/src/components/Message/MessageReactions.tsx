@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useRowT } from "../../i18n/useRowT";
 import { useReactions, useToggleReaction } from "../../hooks/queries/useReactions";
 import { useUserProfiles } from "../../hooks/queries/useUserProfile";
 import { observer } from "mobx-react-lite";
@@ -36,7 +36,7 @@ const PANEL_REM_HEIGHT = 22;
  * `get_user_profiles` read, made only once a pill is hovered or the panel opens.
  */
 export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ messageId, className = "" }) => {
-  const { t } = useTranslation("chat");
+  const t = useRowT("chat");
   const { currentUser } = appStore;
   const { data: reactions = [] } = useReactions(messageId);
   // Pills that arrive after the row painted fade in rather than blink (#2115).

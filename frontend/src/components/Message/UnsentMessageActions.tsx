@@ -1,5 +1,5 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
+import { useRowT } from "../../i18n/useRowT";
 import { Button } from "../ui/Button";
 import { useDiscardUnsent, useRetryMessage } from "../../hooks/queries/useMessages";
 import { retryTarget, unsentReason } from "../../utils/pendingMessages";
@@ -11,7 +11,7 @@ interface UnsentMessageActionsProps {
 
 /** "Not sent", why, then Retry (same message id, never twice) / Discard (withdrawn from everyone if ever sealed) for an unsent message (#1335, #1668). */
 export const UnsentMessageActions: React.FC<UnsentMessageActionsProps> = ({ message }) => {
-  const { t } = useTranslation("chat");
+  const t = useRowT("chat");
   const retry = useRetryMessage();
   const discard = useDiscardUnsent();
   const retryId = retryTarget(message);

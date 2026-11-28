@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useRowT } from "../../i18n/useRowT";
 import { Smile, type LucideIcon } from "lucide-react";
 import { type Placement, panelHeightPx, resolvePlacement } from "./pickerPlacement";
 import { PressButton } from "../ui/PressButton";
@@ -51,7 +51,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
   panelTestId,
   onOpenChange,
 }) => {
-  const { t } = useTranslation("emoji");
+  const t = useRowT("emoji");
   const [open, setOpenState] = useState(false);
   const setOpen = useCallback(
     (next: boolean) => {
