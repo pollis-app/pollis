@@ -59,9 +59,11 @@ pub(crate) async fn catch_up_answer(
     let who = who.to_string();
     let device_id = device_id.to_string();
 
+    // Three round trips, in this order (#2181): (1) everything the main DB
+    // decides first, in one read; (2) the log head; (3) the envelopes.
     let conn = state.db.conn().await?;
-    let Some((mls_group_id, kind)) = resolve_conversation(&conn, &parsed.conversation_id).await?
-    else {
+    let first = catch_up_probe(&conn, &parsed.conversation_id, &who).await?;
+    let Some((mls_group_id, kind)) = first.resolved else {
         // Unknown id: unauthorized, never invented.
         return Ok(CatchUpResponse {
             authorized: false,
@@ -76,7 +78,9 @@ pub(crate) async fn catch_up_answer(
         });
     };
 
-    if !crate::writes::is_member(&conn, &mls_group_id, &who).await? {
+    // Authorization decides before any envelope query is sent; nothing else
+    // the first read found leaves this function for a non-member.
+    if !first.member {
         return Ok(CatchUpResponse {
             authorized: false,
             mls_group_id,
@@ -92,7 +96,7 @@ pub(crate) async fn catch_up_answer(
 
     let conversation_ids = match kind {
         ConversationKind::Dm => vec![mls_group_id.clone()],
-        _ => channel_ids_of(&conn, &mls_group_id).await?,
+        _ => first.channel_ids,
     };
 
     // The log head is read BEFORE the envelopes (#1041), so the client bounds its replay to `head`.
@@ -119,7 +123,7 @@ pub(crate) async fn catch_up_answer(
     };
 
     let membership_version = if parsed.want_membership_version {
-        Some(membership_version(&conn, &mls_group_id).await?)
+        Some(first.membership_version)
     } else {
         None
     };
@@ -280,6 +284,12 @@ pub(crate) const RESOLVE_COLUMNS: &str = "(SELECT group_id FROM channels WHERE i
      EXISTS (SELECT 1 FROM dm_channel WHERE id = :resolve_id), \
      EXISTS (SELECT 1 FROM groups WHERE id = :resolve_id)";
 
+/// The MLS group of the id bound as `:resolve_id`, as SQL: a channel's owning
+/// group, otherwise the id itself (what [`resolve_conversation`] answers for a
+/// DM and a group; an unknown id is refused before it matters).
+pub(crate) const RESOLVED_GROUP_SQL: &str =
+    "COALESCE((SELECT group_id FROM channels WHERE id = :resolve_id), :resolve_id)";
+
 /// [`RESOLVE_COLUMNS`] at `offset` in `row`, in their one precedence: channel,
 /// then DM, then group.
 pub(crate) fn decode_resolved(
@@ -299,43 +309,98 @@ pub(crate) fn decode_resolved(
     Ok(None)
 }
 
-async fn channel_ids_of(conn: &Connection, group_id: &str) -> anyhow::Result<Vec<String>> {
-    crate::util::query_strings(
-        conn,
-        "SELECT id FROM channels WHERE group_id = ?1",
-        libsql::params![group_id.to_string()],
-    )
-    .await
+/// What catch-up's first read decides, in one round trip (#2181).
+struct CatchUpProbe {
+    /// [`resolve_conversation`] of the requested id.
+    resolved: Option<(String, ConversationKind)>,
+    /// [`crate::writes::is_member`] of the caller in the RESOLVED MLS group.
+    member: bool,
+    /// The resolved group's channels, in the order `channels` yields them.
+    channel_ids: Vec<String>,
+    /// [`membership_version`] of the resolved group.
+    membership_version: i64,
 }
 
-/// This device's watermark for each of `conversation_ids`, by conversation.
-async fn fetch_watermarks(
+/// One statement of scalar subqueries over the shared definitions: the
+/// resolve ([`RESOLVE_COLUMNS`], precedence channel, then DM, then group), the
+/// membership predicate on the resolved group (`writes::member_predicate`, the
+/// one `is_member` runs), the group's channel list and its membership version.
+///
+/// The membership version is now read before the head, the envelopes and the
+/// roster, never after: an older or equal value only makes a sender re-check
+/// its tree sooner (#1874).
+async fn catch_up_probe(
     conn: &Connection,
-    conversation_ids: &[String],
+    conversation_id: &str,
     user_id: &str,
-    device_id: &str,
-) -> anyhow::Result<HashMap<String, i64>> {
-    // `last_seq`, not `last_fetched_at` (#1087); NULL reads as 0, re-fetching rather than skipping.
+) -> anyhow::Result<CatchUpProbe> {
     let sql = format!(
-        "SELECT conversation_id, COALESCE(last_seq, 0) FROM conversation_watermark \
-         WHERE user_id = ?1 AND device_id = ?2 AND conversation_id IN ({})",
-        placeholders(conversation_ids.len(), 3)
+        "SELECT {RESOLVE_COLUMNS}, {member}, \
+                (SELECT json_group_array(id) FROM channels WHERE group_id = {group}), \
+                COALESCE((SELECT version FROM conversation_membership_version \
+                          WHERE conversation_id = {group}), 0)",
+        member = crate::writes::member_predicate(RESOLVED_GROUP_SQL, ":user_id"),
+        group = RESOLVED_GROUP_SQL,
     );
-    let mut params: Vec<libsql::Value> = Vec::with_capacity(conversation_ids.len() + 2);
-    params.push(user_id.to_string().into());
-    params.push(device_id.to_string().into());
-    for cid in conversation_ids {
-        params.push(cid.clone().into());
-    }
-    let mut rows = conn.query(&sql, params).await?;
-    let mut out = HashMap::new();
-    while let Some(row) = rows.next().await? {
-        out.insert(row.get(0)?, row.get(1)?);
-    }
-    Ok(out)
+    let mut rows = conn
+        .query(
+            &sql,
+            libsql::named_params! {
+                ":resolve_id": conversation_id.to_string(),
+                ":user_id": user_id.to_string(),
+            },
+        )
+        .await?;
+    let row = rows
+        .next()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("catch-up probe returned no row"))?;
+    let channels: String = row.get(4)?;
+    Ok(CatchUpProbe {
+        resolved: decode_resolved(&row, 0, conversation_id)?,
+        member: row.get::<i64>(3)? != 0,
+        channel_ids: serde_json::from_str(&channels)?,
+        membership_version: row.get(5)?,
+    })
 }
 
-/// Bound per-conversation watermarks, not a correlated subquery, so each is a range seek (#875).
+/// The envelope read for `conversations` conversations, as the production
+/// code sends it, so `tests/envelope_query_plan.rs` EXPLAINs the real SQL.
+///
+/// Binds: `?1` user, `?2` device, then one conversation id each from `?3`.
+///
+/// Each conversation's watermark is inlined as a NON-correlated scalar
+/// subquery on the watermark's primary key, so the range on
+/// `idx_envelope_conv_seq` stays a bound seek (#875) and the watermark and the
+/// envelopes are one snapshot. The outer `COALESCE(.., 0)` is load-bearing:
+/// it maps BOTH a missing watermark row (a new device, a channel never
+/// fetched) and a NULL `last_seq` to 0, i.e. fetch everything; without it
+/// `seq > NULL` would match nothing and the device would never be delivered
+/// to (#1087).
+#[doc(hidden)]
+pub fn envelope_fetch_sql(conversations: usize) -> String {
+    let clauses: Vec<String> = (0..conversations)
+        .map(|i| {
+            let k = i + 3;
+            format!(
+                "(conversation_id = ?{k} AND seq > COALESCE(\
+                    (SELECT last_seq FROM conversation_watermark \
+                      WHERE conversation_id = ?{k} AND user_id = ?1 AND device_id = ?2), 0))"
+            )
+        })
+        .collect();
+    // `rowid` is the order this DS accepted the envelopes in, ACROSS the
+    // group's conversations — see `EnvelopeWire::arrival`.
+    format!(
+        "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, \
+                target_message_id, sent_at, type, seq, rowid \
+         FROM message_envelope \
+         WHERE {} \
+         ORDER BY conversation_id ASC, seq ASC",
+        clauses.join(" OR ")
+    )
+}
+
 /// [`fetch_envelopes`] for ONE conversation — the production delivery query,
 /// exposed so tests assert against the real predicate instead of a copy of it.
 #[cfg(test)]
@@ -365,32 +430,17 @@ async fn fetch_envelopes(
     device_id: &str,
 ) -> anyhow::Result<Vec<EnvelopeWire>> {
     let mut out = Vec::new();
-    // Two binds per conversation now (its id and its own watermark), so half as
-    // many conversations fit under the same variable ceiling.
+    // One read per chunk, its watermarks inlined (see `envelope_fetch_sql`).
+    // The chunk is half the bind budget, as when each conversation bound its
+    // id and its watermark.
     for chunk in conversation_ids.chunks(BIND_CHUNK / 2) {
-        let watermarks = fetch_watermarks(conn, chunk, user_id, device_id).await?;
-        let mut clauses = Vec::with_capacity(chunk.len());
-        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() * 2);
-        for (i, cid) in chunk.iter().enumerate() {
-            clauses.push(format!(
-                "(conversation_id = ?{} AND seq > ?{})",
-                i * 2 + 1,
-                i * 2 + 2
-            ));
+        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() + 2);
+        params.push(user_id.to_string().into());
+        params.push(device_id.to_string().into());
+        for cid in chunk {
             params.push(cid.clone().into());
-            params.push(watermarks.get(cid).copied().unwrap_or(0).into());
         }
-        // `rowid` is the order this DS accepted the envelopes in, ACROSS the
-        // group's conversations — see `EnvelopeWire::arrival`.
-        let sql = format!(
-            "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, \
-                    target_message_id, sent_at, type, seq, rowid \
-             FROM message_envelope \
-             WHERE {} \
-             ORDER BY conversation_id ASC, seq ASC",
-            clauses.join(" OR ")
-        );
-        let mut rows = conn.query(&sql, params).await?;
+        let mut rows = conn.query(&envelope_fetch_sql(chunk.len()), params).await?;
         while let Some(row) = rows.next().await? {
             out.push(EnvelopeWire {
                 conversation_id: row.get(0)?,
@@ -1504,3 +1554,6 @@ pub async fn usable_emoji(
     collect_emoji(&mut rows).await
 }
 
+#[cfg(test)]
+#[path = "directory_catch_up_tests.rs"]
+mod catch_up_fold_tests;

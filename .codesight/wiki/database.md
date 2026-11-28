@@ -1017,27 +1017,45 @@ A counter bumped (`directory::bump_membership_version`) whenever an account or d
 
 **The two columns are in different text formats, deliberately (#908).** A text timestamp's format is decided by one thing: what it is compared against. `last_fetched_at` is compared lexically against `message_envelope.sent_at`, so it is **RFC 3339** — clients write it through `pollis_core::commands::messages::envelope_sent_at`, and the DS's own server-side seeds write it through `pollis_delivery::messages::seeded_watermark_cursor`; `check_cursor_stamp` refuses any other shape at the endpoint. `reported_at` is compared against `datetime('now', ?)` in the `CLEANUP_*` predicate, so it stays in **SQLite's `YYYY-MM-DD HH:MM:SS`**. Until #908 the three seed paths (device registration, DM create / DM member-add, group join) wrote `datetime('now')` into *both*; because a space (0x20) sorts below a `T` (0x54), a seeded cursor compared as older than every RFC 3339 stamp sharing its calendar day — the opposite of the "this device has already consumed the backlog" the seed exists to assert. Fail-safe (over-pin, under-collect — envelopes were kept, never lost), but the seed did not do what its comment claimed. `seeded_watermark_cursor` is the DS-side counterpart to `envelope_sent_at`: one function owns the format so five call sites cannot each get it wrong.
 
-**Read as a BOUND value, never correlated (#1049).** `fetch_envelopes` in
+**Read as a NON-correlated value, inlined (#1049, #2181).** `fetch_envelopes` in
 `pollis-delivery/src/directory.rs` serves every conversation in one query, so
-each needs its own cursor — but the cursor must also be something the planner
-can use as an index range on `idx_envelope_channel_time(conversation_id,
-sent_at DESC, id)`. Expressing it as a subquery correlated on
-`message_envelope.conversation_id` reads correctly and **silently loses the
-range**: the comparison value is not known until the outer row exists, so SQLite
-plans `SEARCH (conversation_id=?)` plus a `CORRELATED SCALAR SUBQUERY` and reads
-every retained envelope in the conversation before discarding it. Measured at
-200k envelopes for a caught-up device returning zero rows: **36 ms / ~200k billed
-rows, versus 0.1 ms / none** for the bound form. The watermarks are therefore
-fetched first (`fetch_watermarks`, one indexed read) and bound per conversation
-as `(conversation_id = ? AND sent_at > ?) OR …`, which plans `MULTI-INDEX OR`
-with a real range seek per branch. Splitting the read is safe in the only
-direction that matters: a `(conversation, user, device)` watermark is advanced by
-that device alone, so a concurrent advance between the two reads can only leave
-an OLDER cursor in play — re-sending an envelope the client already has, which
-ingest's `INSERT OR IGNORE INTO message` absorbs. It can never skip one.
-`pollis-delivery/tests/envelope_query_plan.rs` asserts the plan, because this
-regressed once already: #875 batched the per-channel fetches into one and turned
-a bound `?1` into a correlation, which no correctness test could see.
+each needs its own cursor — and the cursor must be something the planner can
+use as an index range on `idx_envelope_conv_seq(conversation_id, seq)`.
+Expressing it as a subquery correlated on `message_envelope.conversation_id`
+reads correctly and **silently loses the range**: the comparison value is not
+known until the outer row exists, so SQLite plans `SEARCH (conversation_id=?)`
+plus a `CORRELATED SCALAR SUBQUERY` and reads every retained envelope in the
+conversation before discarding it (measured at 200k envelopes for a caught-up
+device returning zero rows: 36 ms / ~200k billed rows, versus 0.1 ms / none).
+Until #2181 the watermarks were therefore fetched in a read of their own and
+bound per conversation. Now each is inlined as a subquery over BOUND parameters
+only, `(conversation_id = ?k AND seq > COALESCE((SELECT last_seq FROM
+conversation_watermark WHERE conversation_id = ?k AND user_id = ?1 AND
+device_id = ?2), 0))`, which SQLite evaluates once as a constant: the plan is
+still `MULTI-INDEX OR` with a real `(conversation_id=? AND seq>?)` seek per
+branch, one round trip fewer, and the watermark and the envelopes are one
+snapshot. The **outer** `COALESCE(.., 0)` is load-bearing: it maps both a
+missing row (a new device, a channel it never fetched) and a NULL `last_seq`
+to 0 (fetch everything); a `SELECT COALESCE(last_seq, 0)` inside would leave a
+missing row NULL, `seq > NULL` would match nothing, and that device would
+never be delivered to. `pollis-delivery/tests/envelope_query_plan.rs` EXPLAINs
+the SQL the production builder emits (`directory::envelope_fetch_sql`, not a
+copy), because this regressed once already: #875 batched the per-channel
+fetches into one and turned a bound `?1` into a correlation, which no
+correctness test could see.
+
+**Catch-up is three round trips, in order (#2181).** `catch_up_answer` (behind
+`/v1/conversations/catch-up` and `/v1/push/fetch`): (1) one main-DB statement
+of scalar subqueries — the resolve (`RESOLVE_COLUMNS`, precedence channel →
+DM → group), the membership predicate on the RESOLVED group
+(`writes::member_predicate`, the one `is_member` runs), the group's channel
+list and its membership version; authorization is decided here and a
+non-member gets nothing else of it; (2) the log-DB head, alone, before (3) the
+envelope read (#1041: the client bounds its replay to that head). The DM's
+channel and the roster stay their own flag-gated reads. Byte-for-byte equal to
+the old sequence of reads for every shape (`directory::catch_up_fold_tests`,
+which keeps the old code verbatim to compare against). A group catch-up went
+from 6 + 1 to 2 + 1 Turso round trips.
 
 Used by the envelope cleanup sweep — the `CLEANUP_CHANNEL_ENVELOPES` / `CLEANUP_DM_ENVELOPES` DELETEs in `pollis-delivery/src/messages.rs` — to decide when it is safe to drop a row from `message_envelope`. The **trigger** is server-side (#689): the DS runs `sweep_envelope_gc` on a fixed cadence (`POLLIS_DS_GC_SWEEP_SECS`, default 3600s) over every conversation with envelopes, so GC no longer rides a member's ingest path and a conversation whose members all go quiet is still collected. The per-conversation `apply_envelope_gc` (the `/v1/envelopes/gc` endpoint) runs the same watermark-gated cleanup on demand; both share the one cleanup chokepoint. That endpoint has **no client caller and is not meant to have one** — it is operator tooling, classified `Audience::Operator` in `pollis-api`'s endpoint table (so `ds_post` will not accept it) and documented in `docs/ds-operator-endpoints.md` (#925). A row is deleted **only** when every **non-revoked, live** device of every current member has watermarked past `sent_at`. Retention is bounded by the slowest member device **and by device liveness** — invariant **I3** in `docs/backend-core-invariants.md`.
 
