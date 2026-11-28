@@ -548,6 +548,52 @@ test.describe("dates follow the app language, not the OS locale", () => {
   });
 });
 
+// Lazy locales (#2186): only English is bundled; a language's catalogues are a local chunk. A chunk
+// that fails or hangs must never keep the app from starting or signing in (the catch-up sweep and the
+// outbox flush start only once the shell is up), so it falls back to English.
+test.describe("a language chunk that fails or hangs never blocks start-up or sign-in", () => {
+  const FRENCH_CHUNK = "**/i18n/locales/fr/**";
+
+  /** The signed-in user's own choice is French; the device starts in English (adoptUserLanguage). */
+  async function storeUserFrench(page: Page) {
+    await page.addInitScript((userId) => {
+      localStorage.setItem("pollis-language:device", "en");
+      localStorage.setItem(`pollis-language:${userId}`, "fr");
+    }, USER.id);
+  }
+
+  test("start-up in French loads the French chunk", async ({ page }) => {
+    await boot(page, "terminal", { withTestLocale: false, osLanguages: ["fr"] });
+    await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  });
+
+  test("a failing chunk at start-up renders the app in English", async ({ page }) => {
+    await page.route(FRENCH_CHUNK, (route) => route.abort());
+    await boot(page, "terminal", { withTestLocale: false, osLanguages: ["fr"] });
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  });
+
+  test("a hanging chunk at start-up is cut off, and the app renders in English", async ({ page }) => {
+    // Never answered: only the load timeout ends the wait.
+    await page.route(FRENCH_CHUNK, () => {});
+    await boot(page, "terminal", { withTestLocale: false, osLanguages: ["fr"] });
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  });
+
+  test("sign-in adopting a stored French choice whose chunk fails still reaches the shell", async ({ page }) => {
+    await storeUserFrench(page);
+    await page.route(FRENCH_CHUNK, (route) => route.abort());
+    await boot(page, "terminal", { withTestLocale: false, osLanguages: ["en-US"] });
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  });
+
+  test("sign-in adopting a stored French choice switches to French", async ({ page }) => {
+    await storeUserFrench(page);
+    await boot(page, "terminal", { withTestLocale: false, osLanguages: ["en-US"] });
+    await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  });
+});
+
 /** Keyboard glyphs that are words are copy (synthetic locale: shipped ones lack these keys). */
 test.describe("keyboard glyphs are translated", () => {
   const KEYS_LANG = "qtk";

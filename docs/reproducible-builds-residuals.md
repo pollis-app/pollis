@@ -436,7 +436,10 @@ patched this same crate once, and reverted it); setting
 `dangerousDisableAssetCspModification` removes the hashes by weakening CSP on a
 security product; collapsing the frontend to a single JS chunk trades app
 startup for byte layout. The list is a CSP allow-list, where order carries no
-meaning, so the divergence is cosmetic. The right resolution is an upstream sort;
+meaning, so the divergence is cosmetic. (#2186 split each non-English language's
+catalogues into its own `locale-<lng>` chunk, which adds one entry per language
+to that list; same class, same verdict. The chunk names are content-hashed and
+two builds of the same tree are byte-identical.) The right resolution is an upstream sort;
 until then it is documented, and the rebuilder's diagnostic surfaces it by naming
 `usr/bin/pollis` as a Pollis-built path so it is never again mistaken for
 vendored drift.

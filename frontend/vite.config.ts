@@ -19,6 +19,14 @@ export default defineConfig({
         entryFileNames: 'assets/[name].[hash].js',
         chunkFileNames: 'assets/[name].[hash].js',
         assetFileNames: 'assets/[name].[hash][extname]',
+        // One chunk per non-English language's catalogues, loaded on demand (src/i18n/resources.ts, #2186).
+        manualChunks(id) {
+          const match = /\/src\/i18n\/locales\/([^/]+)\/[^/]+\.json$/.exec(id)
+          if (match && match[1] !== 'en') {
+            return `locale-${match[1]}`
+          }
+          return undefined
+        },
       },
     },
   },

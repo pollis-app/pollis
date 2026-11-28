@@ -26,6 +26,7 @@ reach:
 | `query-store-boundary.test.ts` | no `queryFn` writes to a MobX store; the exports #929 deleted stay deleted |
 | `message-window.test.ts` | no px load-more constant in `MessageList` (#934) |
 | `message-sharing.test.ts` | no cache writer assigns a field of a cached message in place (#2167); development builds also freeze cached rows, so one that slips through throws |
+| `lazy-locales.test.ts` | nothing but `languageLoader.ts` calls `changeLanguage`, and `main.tsx` renders on `i18nReady.finally` (#2186) |
 | `ui-inventory.test.ts` | `.codesight/wiki/ui.md`'s inventory is regenerated, not hand-patched (#933) |
 | `commands::r2::tests` (Rust) | the media-cache sweep never returns to window focus (#930); a wipe or eviction never deletes outside the cache root, whatever `user_id` it is handed |
 | `commands::auth::server_user_id_is_not_a_path` (Rust) | a DS-minted `user_id` that is not one plain path component ends the sign-in before anything is persisted |
