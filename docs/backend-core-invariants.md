@@ -285,7 +285,11 @@ the invariant that makes it unrepresentable.
   claiming, so the branch cannot win. A lost CAS deletes only a still-unconfirmed
   branch (`forget_unconfirmed_branch`), never the Welcome group that replaced it.
   Callers that genuinely rebuild a broken group (epoch desync, gap recovery)
-  delete it by name first.
+  delete it by name first. A Welcome is applied only under its group's MLS lock
+  (`apply_welcome` takes the `MlsLockHeld` witness and refuses any other group),
+  the lock a catch-up replay holds from reading its group's epoch to its last
+  commit, so no replay can apply a replaced group's commits to the Welcome's group
+  (`lost_messages::a_re_add_welcome_waits_for_a_pass_holding_the_group`).
 - *Result:* "a device holds an epoch, an envelope at it is un-ingested, and the
   device moves to a branch that skipped it" is unrepresentable on the join paths;
   the cursor's epoch rule only ever classifies the three acceptable losses.

@@ -273,6 +273,41 @@ branch is claiming). A lost CAS deletes only a still-unconfirmed branch
 `dms::welcome_polled_while_a_doomed_join_branch_*` force each ordering through
 rendezvous points (`ExternalJoinBeforeSubmit`, `ExternalJoinAfterLostRace`).
 
+**A Welcome is applied under its group's MLS lock.** `apply_welcome` takes a
+`state::MlsLockHeld` witness and refuses a Welcome for any group but the locked
+one (`MlsGroupGuard` records its group), so applying one without the lock does
+not compile. `drain_welcomes` peeks each Welcome first (`peek_welcome`, in a
+rolled-back savepoint: the lineage it joins, and whether it replaces a confirmed
+group held below its epoch), replays those held groups (#1772), then applies each
+Welcome under `mls_group_lock(<its lineage>)`, taken only after the replays (the
+lock is not re-entrant) and released before the next. A catch-up replay holds the
+same lock from reading its group's epoch to its last commit, so a pass that
+started on the held group (a realtime wake, mobile's concurrent ingest) finishes
+first, and `join_from_welcome`'s `welcome_may_replace` check then judges what it
+left. Before, a pass that had read the held group's epoch could apply that
+group's commits to the Welcome's group, fail, delete it and external-join later,
+and what was sealed in between came back as loss placeholders
+(`lost_messages::a_re_add_welcome_waits_for_a_pass_holding_the_group`). A Welcome
+whose lock cannot be had (the cross-process lock timed out) is left unacked for the
+next drain. The #1220 orderings above now meet this lock too: a Welcome that arrives
+while an external join holds the group (its branch stored, or between a lost CAS and
+the retry) waits for it, and the retry, seeing the Welcome pending, stands down to it
+(`DeferredToWelcome`); the two `dms::` tests park the join and assert the poll waits.
+
+**A Welcome drain never runs inside a catch-up pass.** A drain waits on other
+groups' catch-ups (its #1772 replays) and takes group locks, so inside a pass,
+which holds its group's catch-up and, while replaying, its MLS lock, it could
+close a wait cycle with a task doing the same the other way round. The one place
+that drained there, the no-local-group / no-GroupInfo branch of
+`process_one_generation` (#832), now sets `AppState::welcome_poll_owed` instead,
+and `poll_mls_welcomes_inner` / `_deferring` refuse to start inside a pass or
+inside another drain (`welcomes::may_drain_now`, which owes the poll instead).
+The outermost catch-up runs an owed poll once it holds nothing:
+`catch_up_interleaved` after its pass (before the #1571 second pass, as the
+inline poll was), and `process_pending_commits_inner` after its lock drops. A
+drain that owed one to itself goes round once more. So a drain only ever waits
+while holding the cross-process share, which every MLS section shares.
+
 ### Pre-op ingest-before-advance (committer strand, #440)
 
 The group-level catch-up above closes the *fetch / sweep / realtime* variants,

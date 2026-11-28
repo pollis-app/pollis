@@ -75,6 +75,12 @@ tokio::task_local! {
     static RUNNING: HashSet<String>;
 }
 
+/// Whether the current task is inside a catch-up pass (of any group): it holds that group's
+/// flight, and its MLS lock while it replays.
+pub(crate) fn in_catch_up_pass() -> bool {
+    RUNNING.try_with(|running| !running.is_empty()).unwrap_or(false)
+}
+
 /// Run `pass` for `group`, one pass at a time per group.
 ///
 /// A caller that arrives while a pass runs waits for it. It then runs a pass of its own unless

@@ -309,6 +309,8 @@ async fn catch_up_interleaved(
         Box::pin(catch_up_once(state, mls_group_id, user_id, prefetched, mark))
     };
     super::ingest_guard::coalesced(flights, mls_group_id, once).await?;
+    // A Welcome poll the pass owed (no group, no GroupInfo, #832) runs now that it holds nothing.
+    Box::pin(crate::commands::mls::drain_owed_welcomes(state, user_id)).await;
     // A pass that started with no group could only join; run one more pass now (#1571) to show what it holds.
     if !held_before && held(state).await {
         super::ingest_guard::coalesced(flights, mls_group_id, once).await?;

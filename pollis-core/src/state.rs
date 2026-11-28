@@ -149,6 +149,10 @@ pub struct AppState {
     pub outbox_drain: Arc<Mutex<Option<crate::commands::messages::OutboxReport>>>,
     /// A `flush_outbox` that found a drain running asks it to go round again (#1335).
     pub outbox_rerun: Arc<AtomicBool>,
+    /// A Welcome poll is owed: asked for where a drain may not run (inside a catch-up pass, or
+    /// a drain already running), so the outermost catch-up runs it once it holds nothing
+    /// (`mls::welcomes::drain_owed_welcomes`).
+    pub welcome_poll_owed: Arc<AtomicBool>,
     /// Decoded video frames to the media server's WebSocket route: one latest-frame slot per
     /// track per socket (`media_server::FrameFanout`).
     pub screenshare_frame_tx: Arc<crate::media_server::FrameFanout>,
@@ -224,6 +228,7 @@ impl AppState {
             pre_seal_checked: Arc::new(Mutex::new(HashMap::new())),
             outbox_drain: Arc::new(Mutex::new(None)),
             outbox_rerun: Arc::new(AtomicBool::new(false)),
+            welcome_poll_owed: Arc::new(AtomicBool::new(false)),
             screenshare_frame_tx: Arc::new(crate::media_server::FrameFanout::new()),
             overlay: std::sync::Mutex::new(None),
             state_lock: crate::notify::lock::SharedStateLock::new(
@@ -253,6 +258,20 @@ impl AppState {
                 .clone()
         };
         let asked = std::time::Instant::now();
+        // Test-harness only: a caller about to wait behind another holder parks first, so a
+        // test can tell "waiting for the lock" from "never asked for it".
+        #[cfg(feature = "test-harness")]
+        let mutex = match Arc::clone(&entry).try_lock_owned() {
+            Ok(mutex) => mutex,
+            Err(_) => {
+                crate::commands::mls::rendezvous::park(
+                    crate::commands::mls::rendezvous::Point::MlsLockContended,
+                )
+                .await;
+                entry.lock_owned().await
+            }
+        };
+        #[cfg(not(feature = "test-harness"))]
         let mutex = entry.lock_owned().await;
         let cross_process = self.cross_process_lock().await?;
         // A long wait here is a user's action queued behind another MLS step (#1937).
@@ -266,6 +285,7 @@ impl AppState {
         Ok(MlsGroupGuard {
             _mutex: mutex,
             _cross_process: cross_process,
+            group: conversation_id.to_string(),
         })
     }
 
@@ -454,12 +474,17 @@ impl AppState {
 ///
 /// Borrows the guard so it can't outlive the lock.
 pub struct MlsLockHeld<'a> {
-    _guard: &'a MlsGroupGuard,
+    guard: &'a MlsGroupGuard,
 }
 
 impl<'a> MlsLockHeld<'a> {
     pub fn from_guard(guard: &'a MlsGroupGuard) -> Self {
-        Self { _guard: guard }
+        Self { guard }
+    }
+
+    /// The group whose lock is held.
+    pub fn group(&self) -> &str {
+        &self.guard.group
     }
 }
 
@@ -471,6 +496,8 @@ const MLS_LOCK_SLOW_WAIT: std::time::Duration = std::time::Duration::from_secs(1
 pub struct MlsGroupGuard {
     _mutex: tokio::sync::OwnedMutexGuard<()>,
     _cross_process: crate::notify::lock::SharedStateGuard,
+    /// The group (the conversation id `mls_group_lock` was asked for) this guard locks.
+    group: String,
 }
 
 /// Bring the local full-text search index up to date, off the sign-in path (#850).
