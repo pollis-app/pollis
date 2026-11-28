@@ -394,9 +394,9 @@ pending edit of it (an edit carries its target's hash), and their
 Older clients omit the field, and only the DS-side purge runs for them.
 
 Client side, a device that cannot compute a capability is one that is **locked**
-(the account seed is gone). `receipts.rs` skips emitting the receipt rather than
-posting a frame the DS will refuse — already the documented best-effort case: the
-next read or ingest re-emits it, and losing a receipt loses no message.
+(the account seed is gone). `receipts.rs` seals no receipt then rather than
+posting a frame the DS will refuse: the receipt stays owed (`receipt_owed`, see
+`mls.md` → "Receipts are owed until sent") and the app's next drain sends it.
 
 The token is **derived, never transmitted**:
 
@@ -1512,6 +1512,13 @@ envelope, so the loss shows in the conversation instead of vanishing. See
 Once built, later opens see the set is current and take no lock. The retired index is not in the replayed schema either, so a headless open never recreates it. The unlock busy state (desktop `PinEntryScreen` / `PinCreateScreen`, mobile `pin.tsx`'s loader) spans the whole `unlock` / `set_pin` call, so it covers the build.
 
 Pinned by `db::local::message_index_tests` (fresh open builds them; a headless open on a pre-upgrade DB builds nothing; a headless `StateLock` holder makes the open skip the build and still succeed, and during the build the lock is held; a CREATE forced to fail keeps the old index and the open succeeds; a kill between the CREATEs and the DROP is finished by the next open) and `messages::tests::index_equivalence` (old-vs-new results on a seeded DB with no-cursor, own-only, deleted, tied `sent_at`, missing-cursor-row, all-deleted-thread and empty cases, under every index set a device can hold: pre-upgrade, mid-upgrade, upgraded, downgraded; `EXPLAIN QUERY PLAN` asserting covering index ranges and no table scan).
+
+### receipt_owed (DM receipts not yet sent)
+The DM receipts this device owes (`messages::RECEIPT_OWED_DDL`), one row per `(conversation_id, kind, message_id)` (the PK, `WITHOUT ROWID`), cleared only once the envelope carrying it landed (`receipts::drain_owed`; `mls.md` → "Receipts are owed until sent").
+- `kind` TEXT NOT NULL CHECK IN (`delivered`, `read`)
+- `read_at` TEXT — the reader's own time (#2140); `CHECK ((kind = 'read') = (read_at IS NOT NULL))`, so a read row without its time, or a delivered row with one, cannot be stored
+- A delivered row is written in the per-envelope savepoint that stores its message; a read row by `mark_messages_read`. Neither while the opt-out (`send_read_receipts`) is off.
+- **Created only by the app's own open** (`LocalDb::open_at`), like the #2171/#2172 indexes and unlike `local_schema.sql`: `CREATE TABLE IF NOT EXISTS`, a short write, additive (an older build never reads it). The extensions' opens never create it; a file the app has not opened since the upgrade has no table, and a pass there sends what it stored from memory, once, as before. Pinned by `receipts::tests` (shape CHECKs, owed once, opt-out, bounded frames, per-frame clearing, the missing table).
 
 ### outbox_attachment (#1335)
 - `message_id` TEXT NOT NULL — the message these bytes belong to (no foreign key: the bytes are written BEFORE the row, which is the commit point)

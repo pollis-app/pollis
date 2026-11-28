@@ -59,22 +59,6 @@ async fn device_of(client: &TestClient) -> String {
     client.state.device_id.lock().await.clone().expect("device id")
 }
 
-/// `(message_id, reader_id, kind)` of every receipt `client` holds in `conversation`.
-async fn receipts(client: &TestClient, conversation: &str) -> Vec<(String, String, String)> {
-    let guard = client.state.local_db.lock().await;
-    let conn = guard.as_ref().expect("db").conn();
-    let mut st = conn
-        .prepare(
-            "SELECT r.message_id, r.reader_id, r.kind FROM message_receipt r \
-             JOIN message m ON m.id = r.message_id WHERE m.conversation_id = ?1",
-        )
-        .unwrap();
-    st.query_map([conversation], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-        .unwrap()
-        .map(|r| r.unwrap())
-        .collect()
-}
-
 async fn handle_for(user_id: &str, conversation_id: &str, kind: &str) -> String {
     let remote = writable_remote().await;
     let conn = remote.conn().await.expect("conn");
@@ -879,7 +863,7 @@ async fn a_dm_push_reads_in_one_request_and_posts_the_rest_after() {
     assert!(paths.iter().any(|p| p == "/v1/messages/send"), "the receipt envelope was posted: {paths:?}");
     alice.fetch_dm_messages(&dm).await;
     let delivered = (second, bob_p.id.clone(), "delivered".to_string());
-    assert!(receipts(&alice, &dm).await.contains(&delivered), "alice sees it delivered");
+    assert!(alice.receipts(&dm).await.contains(&delivered), "alice sees it delivered");
 }
 
 /// #1804: a Delivery Service that predates `/v1/push/fetch` still gets the preview, through
@@ -988,6 +972,32 @@ async fn push_dm() -> (TestClient, TestClient, String) {
     alice.fetch_dm_messages(&dm).await;
     bob.fetch_dm_messages(&dm).await;
     (alice, bob, dm)
+}
+
+/// A DM message a headless fetch stores while the app is locked still gets its delivered
+/// receipt. The fetch cannot sign one (no delete capability while locked), so the receipt stays
+/// owed, and the app's next pass sends it even though that pass fetches nothing new.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_message_a_headless_fetch_stored_is_acknowledged_by_the_apps_next_pass() {
+    let _mobile = MobileBuild::on();
+    let (alice, bob, dm) = push_dm().await;
+
+    let m = alice.send_channel_message_id(&dm, "stored by the extension").await;
+    let handle = handle_for(bob.user_id(), &dm, "dm").await;
+    let out = headless(&bob, Some(handle), Duration::from_secs(20)).await;
+    let bodies: Vec<String> = items(&out).into_iter().map(|i| i.body).collect();
+    assert_eq!(bodies, vec!["stored by the extension".to_string()]);
+
+    // The app's next pass has nothing new to fetch.
+    bob.fetch_dm_messages(&dm).await;
+    alice.fetch_dm_messages(&dm).await;
+    let delivered = (m, bob.user_id().to_string(), "delivered".to_string());
+    assert!(
+        alice.receipts(&dm).await.contains(&delivered),
+        "the headless fetch stored it and nobody ever acknowledged it: {:?}",
+        alice.receipts(&dm).await
+    );
 }
 
 /// `catch_up_mls_group_interleaved` for `client` in its own task.

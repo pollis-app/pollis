@@ -1957,6 +1957,10 @@ async fn drain(state: &Arc<AppState>) -> Result<OutboxReport> {
     let (edits_delivered, edits_failed) = super::edit_outbox::drain_edits(state).await?;
     report.edits_delivered = edits_delivered;
     report.edits_failed = edits_failed;
+    // The receipts this device still owes (one stored while locked, or whose send failed).
+    if let Err(e) = super::receipts::drain_all_owed(state).await {
+        crate::diag!("[outbox] owed receipts not sent yet: {e}");
+    }
     Ok(report)
 }
 

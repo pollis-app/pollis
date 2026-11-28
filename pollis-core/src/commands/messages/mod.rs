@@ -48,6 +48,15 @@ pub(super) async fn with_local_conn<T>(
     f(db.conn())
 }
 
+/// The first column of every row `sql` (no parameters) returns, as strings.
+pub(super) fn strings_on(conn: &rusqlite::Connection, sql: &str) -> crate::error::Result<Vec<String>> {
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 /// [`envelope_sent_at`] with the clock lifted out, so tests can pick the instant.
 pub(super) fn stamp_envelope_sent_at(at: chrono::DateTime<chrono::Utc>) -> String {
     at.to_rfc3339()
@@ -199,7 +208,8 @@ pub use read_state::{
     get_unread_counts, mark_conversation_read, pull_read_cursors, refresh_read_cursors, ReadCursor,
     UnreadCount,
 };
-pub use receipts::{get_conversation_receipts, mark_messages_read, MessageReceipts};
+pub use receipts::{get_conversation_receipts, mark_messages_read, MessageReceipts, ReceiptDrains};
+pub(crate) use receipts::RECEIPT_OWED_DDL;
 
 pub use reactions::{
     add_reaction, get_reactions, get_reactions_for_messages, remove_reaction, Reaction,

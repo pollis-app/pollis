@@ -410,7 +410,8 @@ async fn catch_up_once(
             })
         })
         .collect();
-    // Delivery receipts (#857), batched per conversation; `emit_receipt` re-checks the gates. Best-effort.
+    // Delivery receipts (#857): what each conversation owes, this pass's and any earlier, through
+    // the one receipt drain, which re-checks the gates.
     let delivered: Vec<(String, Vec<String>)> = if is_dm {
         results
             .iter()
@@ -420,6 +421,7 @@ async fn catch_up_once(
         Vec::new()
     };
     let tail_state = Arc::clone(state);
+    let tail_user = user_id.to_string();
     let tail = async move {
         let state = &tail_state;
         let watermarks = futures_util::future::join_all(watermark_bodies.iter().map(|body| async move {
@@ -430,10 +432,7 @@ async fn catch_up_once(
                 );
             }
         }));
-        let receipts = emit_delivered_batches(
-            state,
-            delivered.iter().map(|(c, ids)| (c.as_str(), ids.as_slice())),
-        );
+        let receipts = super::receipts::send_owed(state, &tail_user, &delivered);
         tokio::join!(watermarks, receipts);
     };
     // Everything above is stored; a push fetch posts its notification without waiting for
@@ -500,43 +499,27 @@ pub(super) fn into_sealing_order(run: &mut [(usize, usize)], arrival: &[Vec<Opti
     run.sort_by_key(|&(ci, ei)| arrival.get(ci).and_then(|a| a.get(ei)).copied().flatten());
 }
 
-/// Emit one delivery receipt per conversation for newly persisted messages (#857). Best-effort.
-async fn emit_delivered_batches<'a>(
-    state: &Arc<AppState>,
-    batches: impl Iterator<Item = (&'a str, &'a [String])>,
-) {
-    for (conversation_id, ids) in batches {
-        if ids.is_empty() {
-            continue;
-        }
-        if let Err(e) = super::receipts::emit_delivered(state, conversation_id, ids).await {
-            crate::diag!("[receipts] delivered emit failed for {conversation_id}: {e}");
-        }
-    }
-}
-
 /// What the committer's sweep ([`sweep_current_epoch`]) persisted, handed back
 /// so the receipts it owes are sent only once the won commit is merged.
 pub(crate) struct SweptEnvelopes {
     is_dm: bool,
+    user_id: String,
     newly_delivered: Vec<(String, Vec<String>)>,
 }
 
 impl SweptEnvelopes {
-    /// Send the delivery receipts for what the sweep persisted. Deferred to
-    /// after the merge because a receipt is itself an MLS send, and encrypting
-    /// merges any staged commit first — before the committer has finalized it.
-    pub(crate) async fn emit_receipts(self, state: &Arc<AppState>) {
+    /// Send the delivery receipts the sweep's messages owe (they are owed already, with the
+    /// rows). The committer still holds the group's MLS lock, and a receipt is sealed under it,
+    /// so the drain runs in its own task and seals once the committer lets go; a drain that
+    /// never runs (the process ends first) leaves them owed for the next one.
+    pub(crate) fn send_receipts(self, state: &Arc<AppState>) {
         if !self.is_dm {
             return;
         }
-        emit_delivered_batches(
-            state,
-            self.newly_delivered
-                .iter()
-                .map(|(cid, ids)| (cid.as_str(), ids.as_slice())),
-        )
-        .await;
+        let task_state = Arc::clone(state);
+        state.spawn_background(async move {
+            super::receipts::send_owed(&task_state, &self.user_id, &self.newly_delivered).await;
+        });
     }
 }
 
@@ -557,6 +540,7 @@ pub(crate) async fn sweep_current_epoch(
     let is_dm = resolved.kind == pollis_api::directory::ConversationKind::Dm;
     let mut swept = SweptEnvelopes {
         is_dm,
+        user_id: user_id.to_string(),
         newly_delivered: Vec::new(),
     };
     if !resolved.authorized {
@@ -1209,8 +1193,12 @@ fn open_and_persist(
                             }
                         }
                         // New inbound: stored for the first time and someone else's. Only a DM
-                        // acknowledges it (#857); any conversation's wake may announce it (#1628).
+                        // acknowledges it (#857), and the receipt is owed in this savepoint, with
+                        // the row; any conversation's wake may announce it (#1628).
                         if inserted > 0 && cred_sender != user_id {
+                            if is_dm {
+                                super::receipts::owe_delivered_on(conn, conversation_id, id);
+                            }
                             return Ingested::Opened(Some(id.clone()));
                         }
                     }

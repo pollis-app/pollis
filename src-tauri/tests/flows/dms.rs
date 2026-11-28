@@ -1189,6 +1189,129 @@ async fn a_read_receipt_cannot_advance_the_epoch_of_a_parked_committer() {
     drop(bob);
 }
 
+/// A DM between two settled members: both hold the group and have read everything so far.
+async fn settled_dm() -> (TestClient, TestClient, String) {
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let dm_id = alice.create_dm(&[&bob_profile.id]).await;
+    bob.accept_dm_request(&dm_id).await;
+    alice.send_channel_message(&dm_id, "settle").await;
+    bob.fetch_dm_messages(&dm_id).await;
+    alice.fetch_dm_messages(&dm_id).await;
+    (alice, bob, dm_id)
+}
+
+/// A read receipt asked for while this device holds a staged commit is owed, not dropped: it
+/// waits for the committer, then goes out at the epoch the commit produced.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_read_receipt_asked_for_behind_a_staged_commit_still_reaches_the_sender() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    use std::time::Duration;
+
+    let (alice, bob, dm_id) = settled_dm().await;
+    let m = alice.send_channel_message_id(&dm_id, "READ_ME_LATER").await;
+    assert!(bob
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .any(|x| x["content"] == "READ_ME_LATER"));
+
+    // Bob's own rotation, parked with its commit staged: he holds the DM's MLS lock.
+    let mut staged = rendezvous::arm(Point::SelfUpdateBeforeSubmit);
+    let rotate = {
+        let state = bob.state.clone();
+        let (dm, user) = (dm_id.clone(), bob.user_id().to_string());
+        tokio::spawn(async move {
+            pollis_lib::commands::mls::self_update_group(&state, &dm, &user).await
+        })
+    };
+    let release_rotation = tokio::time::timeout(Duration::from_secs(30), staged.recv())
+        .await
+        .expect("bob never staged his rotation")
+        .expect("rendezvous closed");
+    rendezvous::disarm(Point::SelfUpdateBeforeSubmit);
+    let (epoch_staged, pending) =
+        pollis_lib::commands::mls::local_epoch_and_pending(&bob.state, &dm_id)
+            .await
+            .expect("bob has the DM's group");
+    assert!(pending, "the rendezvous must park bob with a staged commit");
+
+    // He reads it on screen meanwhile. Marking returns at once; the receipt cannot be sealed
+    // under the staged commit, so it is either owed or gone.
+    pollis_core::commands::messages::mark_messages_read(
+        dm_id.clone(),
+        bob.user_id().to_string(),
+        vec![m.clone()],
+        &bob.state,
+    )
+    .await
+    .expect("mark_messages_read");
+    // Whatever it did, it never touched the staged commit (#1079).
+    assert_eq!(
+        pollis_lib::commands::mls::local_epoch_and_pending(&bob.state, &dm_id)
+            .await
+            .expect("bob still has the DM's group"),
+        (epoch_staged, true),
+        "a read receipt moved a parked committer's group"
+    );
+    let _ = release_rotation.send(());
+    assert!(rotate.await.expect("rotation task").expect("self_update_group"));
+    // Whatever bob's device still had to send goes out now the commit is merged.
+    bob.state.settle_background().await;
+
+    alice.fetch_dm_messages(&dm_id).await;
+    let read_receipt = (m, bob.user_id().to_string(), "read".to_string());
+    assert!(
+        alice.receipts(&dm_id).await.contains(&read_receipt),
+        "bob read it while his commit was staged and alice never learned: {:?}",
+        alice.receipts(&dm_id).await
+    );
+}
+
+/// A delivered receipt sealed just before a commit lands is refused as epoch-behind; it is
+/// re-sealed at the new epoch and posted, like every other envelope (#1041).
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_delivered_receipt_sealed_behind_a_landed_commit_is_resealed_and_delivered() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    use std::time::Duration;
+
+    let (alice, bob, dm_id) = settled_dm().await;
+    let m = alice.send_channel_message_id(&dm_id, "ACK_ME").await;
+
+    // Bob's ingest stores it and seals the delivered receipt; park that receipt before its post.
+    let mut parked = rendezvous::arm(Point::EnvelopeBeforePost);
+    let ingest = {
+        let state = bob.state.clone();
+        let (dm, user) = (dm_id.clone(), bob.user_id().to_string());
+        tokio::spawn(async move {
+            pollis_core::commands::messages::catch_up_mls_group_interleaved(&state, &dm, &user).await
+        })
+    };
+    let release = tokio::time::timeout(Duration::from_secs(30), parked.recv())
+        .await
+        .expect("bob's delivered receipt never reached its post")
+        .expect("rendezvous closed");
+    rendezvous::disarm(Point::EnvelopeBeforePost);
+
+    // Alice's commit lands first: the receipt's epoch is behind the log.
+    assert!(alice.self_update(&dm_id).await, "alice's rotation must land");
+    let _ = release.send(());
+    ingest.await.expect("ingest task").expect("catch-up");
+
+    alice.fetch_dm_messages(&dm_id).await;
+    let delivered = (m, bob.user_id().to_string(), "delivered".to_string());
+    assert!(
+        alice.receipts(&dm_id).await.contains(&delivered),
+        "bob's delivered receipt was dropped as epoch-behind: {:?}",
+        alice.receipts(&dm_id).await
+    );
+}
+
 /// Which link broke: never stored, or at/below the cursor (else it failed to decrypt).
 async fn diagnose_missing_delivery(user_id: &str, conversation_id: &str) -> String {
     let remote = crate::harness::writable_remote().await;

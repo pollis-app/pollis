@@ -213,7 +213,7 @@ pub(super) async fn publish_staged_commit(
             .await?;
             finalize_won_commit(state, conversation_id, generation).await?;
             if let Some(swept) = swept {
-                swept.emit_receipts(state).await;
+                swept.send_receipts(state);
             }
             Ok(PublishOutcome::Won)
         }

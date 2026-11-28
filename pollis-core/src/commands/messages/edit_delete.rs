@@ -401,21 +401,8 @@ async fn send_redaction_message(
             envelope_id: &envelope_id,
         },
         sealed,
-        |sealed| pollis_api::messages::SendMessageBody {
-            id: envelope_id.clone(),
-            conversation_id: conversation_id.to_string(),
-            sender_id: Some(super::send::SEALED_SENDER_SENTINEL.to_string()),
-            ciphertext: sealed.wire(),
-            // A redaction is not a reply.
-            reply_to_id: None,
-            sent_at: sealed.sent_at.clone(),
-            sealed: 1,
-            generation: Some(sealed.generation),
-            epoch: Some(sealed.epoch),
-            // A redaction wakes nobody (#987).
-            push_to: None,
-            push_mentions: None,
-            delete_token_hash: delete_token_hash.clone(),
+        |sealed| {
+            super::seal::control_envelope(&envelope_id, conversation_id, sealed, delete_token_hash.clone())
         },
         |_, _| Ok(()),
     )

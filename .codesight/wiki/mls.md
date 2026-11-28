@@ -389,8 +389,9 @@ Three enforcement points, lowest layer first:
    is complete. If the sweep fails twice the won commit stays STAGED (the next
    ingesting catch-up drains the epoch and adopts it from the log); a migration
    merges anyway with a loud log, because abandoning an opened successor
-   lineage strands every member. Receipts for swept envelopes are emitted after
-   the merge.
+   lineage strands every member. Receipts for swept envelopes are owed with
+   their rows and sent once the committer lets go of the lock (the receipt
+   drain seals under it, see "Receipts are owed until sent" below).
 3. **Sender re-seal.** Every post site — send, edit, redaction — goes through
    `messages::seal::post_resealing`: on `epoch_behind` it runs the interleaved
    catch-up, re-seals at the new epoch with a fresh `sent_at`, updates its own
@@ -399,17 +400,17 @@ Three enforcement points, lowest layer first:
    takes the next **delivery sequence**, so it lands above every recipient's
    cursor whatever its timestamp says. Before that the stamp had to be refreshed
    or the re-post could sort beneath a cursor that had already moved.
-   Receipts (`receipts::emit_receipt`) are best-effort and skip instead — some
-   callers hold the group lock. Bounded replay on the receiver side:
+   Receipts take the same path (`receipts::drain_owed`, below). Bounded replay
+   on the receiver side:
    `CatchUpResponse.head` becomes a `ReplayBound`, so a receiver never applies a
    commit its fetched envelope set does not yet cover.
 
 4. **Only the log decides an epoch (#1079).** All three points above assume the
    local epoch moves only when the commit log has spoken. `load_group_with_signer`
    broke that assumption: it merged any pending commit as a side effect of
-   *loading a group*, so `try_mls_encrypt` — reached from
-   `receipts::emit_receipt`, which by design takes no MLS lock and fires at the
-   end of every DM catch-up — merged a committer's staged commit mid-flight. On a
+   *loading a group*, so `try_mls_encrypt` — reached from the receipt emitter
+   of the time, which took no MLS lock and fired at the end of every DM
+   catch-up — merged a committer's staged commit mid-flight. On a
    lost race the device sat at a **phantom epoch** on a branch the log never held
    (`clear_pending_best_effort` then found nothing to clear, and the Kani-proved
    `invariants::resolve` never saw it); on a won one point 2's sweep opened its
@@ -435,8 +436,8 @@ Three enforcement points, lowest layer first:
    across its seal. That is a type-level requirement, not a convention:
    `seal::seal_under_lock` demands a `state::MlsLockHeld` witness, constructible
    only from a live guard, so a new post site that forgets the lock does not
-   compile. The lock-free caller (`receipts::emit_receipt`, which would deadlock
-   the catch-up paths that hold it) uses `seal::try_seal_unlocked` and skips.
+   compile. There is no lock-free caller any more: receipts seal under the lock
+   too (below).
    Asking "do I have this group?" is `has_local_group`, never a failed encrypt —
    the edit/redaction repair probes used the latter, and a `false` there triggers
    an external-join rebuild.
@@ -449,6 +450,48 @@ parks the sender at `EnvelopeBeforePost`), and
 `a_read_receipt_cannot_advance_the_epoch_of_a_parked_committer` (#1079 — parks
 the committer, drives `mark_messages_read` at it, and asserts the epoch and the
 staged commit are both untouched).
+
+**Receipts are owed until sent.** A DM delivered receipt used to be sealed with
+no MLS lock straight after the catch-up that stored the message, and skipped
+whenever it could not go: a staged commit (the encrypt returns "not now"), a
+commit landing between seal and post (`epoch_behind`), or a locked device (a
+push extension has no delete capability, #1135). Nothing re-sent it, since the
+next pass found the message already stored, so most messages a phone stored
+from a push were never acknowledged. Now:
+
+- A receipt this device owes is a row in the local `receipt_owed` table
+  (`receipts::RECEIPT_OWED_DDL`; `(conversation, kind, message)`, a read row
+  carrying the reader's time, a CHECK making either shape without it
+  unstorable). A delivered one is written in the per-envelope savepoint that
+  stores the message (`ingest::open_and_persist` → `owe_delivered_on`), so a
+  stored inbound DM message always has its receipt sent or owed; a read one by
+  `mark_messages_read`. Nothing is owed while the opt-out is on.
+- `receipts::drain_owed` is the one way out, for every caller: the catch-up
+  pass's tail (inline, in a push fetch's deferred tail, or detached after a
+  seal, #1804, #2141), the committer after its merge (`SweptEnvelopes::
+  send_receipts`, in its own task, since the committer still holds the lock the
+  seal needs), `mark_messages_read`, and the outbox drain (`flush_outbox`:
+  unlock, reconnect, resume). It seals each frame (at most
+  `MAX_IDS_PER_RECEIPT` ids) under the DM's MLS lock (`seal_under_lock`) and
+  posts it through `seal::post_resealing`, which catches up and re-seals on
+  `epoch_behind` like a message. A frame's rows are cleared only once it
+  landed; a locked device seals nothing and keeps them; a conversation that is
+  no longer a DM or no longer has us, the opt-out, or a refusal no retry fixes
+  clears them. One drain per conversation runs at a time per process
+  (`AppState::receipt_drains`); one asked for meanwhile, including from inside
+  the running drain's own re-seal catch-up, makes it go round again instead of
+  waiting. Two processes draining the same rows can each send a frame: the
+  receiver's `INSERT OR IGNORE` makes that a no-op.
+- The table is created by the app's own open (`LocalDb::open_at`), never by an
+  extension's (the #2192 rule): a file no build with it has opened yet has no
+  table, and then the pass sends what it just stored once, from memory, as
+  before.
+
+Tests (`dms.rs`, `rich_push.rs`), each failing before:
+`a_read_receipt_asked_for_behind_a_staged_commit_still_reaches_the_sender`,
+`a_delivered_receipt_sealed_behind_a_landed_commit_is_resealed_and_delivered`,
+`a_message_a_headless_fetch_stored_is_acknowledged_by_the_apps_next_pass`;
+unit tests in `receipts::tests`.
 
 ### Lost messages are visible (#1312)
 
@@ -726,7 +769,7 @@ races, and duplicate deliveries. All are additive to the flows above.
   keeps the stale-leaf-only check, so a wake every member answers at once does not
   burn a claim per member from a pool that just ran dry.
 - **Mobile, join-time and pre-seal backstop (#1571).** The sweep is desktop's, and runs once per sign-in/cold launch (`AppShell` mount) — a desktop left open for hours never runs it again. Mobile never ran it at all. In the incident a user's new desktop external-joined a DM seconds after creation while the creator's add of the user's older desktop (full pool) lost its race, and the new desktop stayed a member for thirteen hours without re-adding its sibling: no rule excludes a user's own devices (`desired_set` is user-agnostic), there was simply no trigger. Four more callers now reach the same `reconcile_if_tree_drifted`: `catch_up_mls_group_interleaved`, once, when a catch-up begins with no group and ends holding one (the joining device adds whoever is still missing — its own other devices included); the bridged `reconcile_backstop_all` (every conversation, no catch-up — mobile runs it after its landing and resume ingest pass, `mobile/lib/mlsBackstop.ts` from `useInboxRealtime`); `backstop_before_seal`, which `send::deliver_queued` runs after its catch-up and before sealing, at most once per conversation per `PRE_SEAL_CHECK_INTERVAL` (10 min, `AppState::pre_seal_checked`) so the next message into a conversation with a missing device adds it first; and `accept_dm_request`, which now catches the DM up and runs it, so the accepter's other devices are added by whichever device accepted. With last-resort packages `has_addable_device` wakes for a current build whose pool is empty; a device with nothing published (an old build's spent pool) still does not wake it.
-- **Departures skip the pre-seal interval (#1874).** The DS bumps `conversation_membership_version` for an MLS group whenever an account or device leaves its roster: account deletion, identity reset, leaving or being removed from a group or DM, device revocation, and logout with data deletion. `send::deliver_queued` reads it on the catch-up it already makes (`CatchUpBody.want_membership_version`), and `backstop_before_seal` runs the check at once when it differs from the version `AppState::pre_seal_checked` recorded at the last check, interval or not. So the first message any remaining member sends after a departure is sealed only after the departed devices' leaves are removed. Edits and redactions (`edit_message`, `send_redaction_message`) run `backstop_on_membership_change`, which checks only on such a change, so they add no reads in steady state. Receipts are left out: they are sealed from ingest without a catch-up. Account deletion also has the DS send the `membership_changed` leave wake-up to every group and DM the account was in (`account::spawn_leave_wakes`), in addition to the deleting client's own. A DS without the field returns `None`, and the client keeps the interval alone. Older clients don't ask for the field and are unchanged.
+- **Departures skip the pre-seal interval (#1874).** The DS bumps `conversation_membership_version` for an MLS group whenever an account or device leaves its roster: account deletion, identity reset, leaving or being removed from a group or DM, device revocation, and logout with data deletion. `send::deliver_queued` reads it on the catch-up it already makes (`CatchUpBody.want_membership_version`), and `backstop_before_seal` runs the check at once when it differs from the version `AppState::pre_seal_checked` recorded at the last check, interval or not. So the first message any remaining member sends after a departure is sealed only after the departed devices' leaves are removed. Edits and redactions (`edit_message`, `send_redaction_message`) run `backstop_on_membership_change`, which checks only on such a change, so they add no reads in steady state. Receipts are left out: they acknowledge what is already stored and carry no message content. Account deletion also has the DS send the `membership_changed` leave wake-up to every group and DM the account was in (`account::spawn_leave_wakes`), in addition to the deleting client's own. A DS without the field returns `None`, and the client keeps the interval alone. Older clients don't ask for the field and are unchanged.
 - **Welcome dedupe + idempotent resubmit (P2).** A `UNIQUE (conversation_id,
   recipient_id, recipient_device_id)` index on `mls_welcome` (commit-log-DB
   migration 000002) plus `ON CONFLICT … DO UPDATE` upserts in the submit bundle

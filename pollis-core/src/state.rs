@@ -149,6 +149,8 @@ pub struct AppState {
     pub outbox_drain: Arc<Mutex<Option<crate::commands::messages::OutboxReport>>>,
     /// A `flush_outbox` that found a drain running asks it to go round again (#1335).
     pub outbox_rerun: Arc<AtomicBool>,
+    /// The receipt drains running per conversation (`messages::receipts::drain_owed`).
+    pub receipt_drains: Arc<crate::commands::messages::ReceiptDrains>,
     /// A Welcome poll is owed: asked for where a drain may not run (inside a catch-up pass, or
     /// a drain already running), so the outermost catch-up runs it once it holds nothing
     /// (`mls::welcomes::drain_owed_welcomes`).
@@ -228,6 +230,7 @@ impl AppState {
             pre_seal_checked: Arc::new(Mutex::new(HashMap::new())),
             outbox_drain: Arc::new(Mutex::new(None)),
             outbox_rerun: Arc::new(AtomicBool::new(false)),
+            receipt_drains: Arc::default(),
             welcome_poll_owed: Arc::new(AtomicBool::new(false)),
             screenshare_frame_tx: Arc::new(crate::media_server::FrameFanout::new()),
             overlay: std::sync::Mutex::new(None),

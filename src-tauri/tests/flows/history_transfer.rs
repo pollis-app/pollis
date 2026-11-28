@@ -229,9 +229,9 @@ async fn a_sibling_copies_the_sources_history_exactly() {
     assert_eq!(r.iter().find(|x| x.0 == ids[3]).unwrap().3.as_deref(), Some("edited after the copy"));
 
     // DM receipts came across (receipts are on by default, and it is a DM).
-    let on_desk = receipts(&desk, &dm).await;
+    let on_desk = desk.receipts(&dm).await;
     assert!(!on_desk.is_empty(), "the DM has delivery receipts to copy");
-    assert_eq!(receipts(&phone, &dm).await, on_desk);
+    assert_eq!(phone.receipts(&dm).await, on_desk);
 
     // Copying again is safe: nothing changes, nothing duplicates.
     let before = rows(&phone, &[&channel, &dm]).await;
@@ -757,21 +757,6 @@ async fn an_expired_request_ends_cleanly() {
     approve(&desk, &t2.transfer_id, Some(TEST_PIN)).await.unwrap();
     let (_, d) = run_both(&desk, &phone, &t2.transfer_id).await;
     assert_eq!(d.unwrap().state, "completed");
-}
-
-async fn receipts(c: &TestClient, conversation: &str) -> Vec<(String, String, String)> {
-    let guard = c.state.local_db.lock().await;
-    let conn = guard.as_ref().unwrap().conn();
-    let mut st = conn
-        .prepare(
-            "SELECT r.message_id, r.reader_id, r.kind FROM message_receipt r JOIN message m ON m.id = r.message_id
-             WHERE m.conversation_id = ?1 ORDER BY 1, 2, 3",
-        )
-        .unwrap();
-    st.query_map([conversation], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-        .unwrap()
-        .map(|r| r.unwrap())
-        .collect()
 }
 
 async fn unread(c: &TestClient, conversation: &str) -> i64 {
