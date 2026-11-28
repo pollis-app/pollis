@@ -50,12 +50,21 @@ pub mod rendezvous {
         OutboxBeforeRow,
         /// A commit this device landed is merged; its key follow-ups have not run (#1937).
         AfterEpochAdvanced,
+        /// A catch-up replay holds the group's MLS lock and has read the local epoch it
+        /// replays from; no commit is fetched or applied yet.
+        ReplayStarted,
+        /// A Welcome drain is about to apply one Welcome (before it takes the group's lock).
+        WelcomeBeforeApply,
+        /// A catch-up caller holds its single-flight ticket and must wait for a running pass.
+        CatchUpWaiting,
+        /// An MLS group lock is held by someone else; this caller is about to wait for it.
+        MlsLockContended,
     }
 
-    const POINTS: usize = 7;
+    const POINTS: usize = 11;
 
     static ARMED: Mutex<[Option<mpsc::UnboundedSender<Release>>; POINTS]> =
-        Mutex::new([None, None, None, None, None, None, None]);
+        Mutex::new([const { None }; POINTS]);
 
     /// Arm `point`: clients reaching it park and send a [`Release`] on the returned receiver.
     pub fn arm(point: Point) -> mpsc::UnboundedReceiver<Release> {
@@ -1157,8 +1166,13 @@ pub async fn process_pending_commits_inner(
     mls_group_id: &str,
     user_id: &str,
 ) -> crate::error::Result<()> {
-    let _guard = state.mls_group_lock(mls_group_id).await?;
-    process_pending_commits_locked(state, mls_group_id, user_id).await
+    let replayed = {
+        let _guard = state.mls_group_lock(mls_group_id).await?;
+        process_pending_commits_locked(state, mls_group_id, user_id).await
+    };
+    // The lock is released: a Welcome poll the replay owed runs now.
+    Box::pin(super::drain_owed_welcomes(state, user_id)).await;
+    replayed
 }
 
 /// Whether this device's `user_device` row still exists, so a revoked device cannot auto-rejoin.
@@ -1387,20 +1401,18 @@ async fn process_one_generation<'h>(
                              (not external-joining) to avoid racing our own Welcome"
                         );
                     } else {
-                        // No GroupInfo yet: poll for the Welcome now (#832).
+                        // No GroupInfo yet: poll for the Welcome (#832). Not here: this replay
+                        // holds the group's lock (and, ingesting, its catch-up), and a drain
+                        // takes group locks and waits on catch-ups, so it is owed and runs as
+                        // soon as the caller holds nothing (`welcomes::drain_owed_welcomes`).
                         crate::diag!(
                             "[mls] process_pending_commits: no local group for {mls_group_id} and no \
                              published GroupInfo — awaiting a Welcome (external-join would have \
-                             nothing to join onto); polling welcomes now"
+                             nothing to join onto); polling welcomes once this pass ends"
                         );
-                        // `Box::pin`: this can recurse via poll_mls_welcomes.
-                        if let Err(e) =
-                            Box::pin(super::poll_mls_welcomes(state, user_id.to_string())).await
-                        {
-                            crate::diag!(
-                                "[mls] process_pending_commits: welcome poll for {mls_group_id} failed: {e}"
-                            );
-                        }
+                        state
+                            .welcome_poll_owed
+                            .store(true, std::sync::atomic::Ordering::SeqCst);
                     }
                 }
                 super::invariants::JoinRecovery::ExternalJoin => {
@@ -1424,6 +1436,9 @@ async fn process_one_generation<'h>(
             hook(db.conn(), generation, initial_epoch);
         }
     }
+    // Test-harness only: park a replay that holds the lock and knows the epoch it starts from.
+    #[cfg(feature = "test-harness")]
+    rendezvous::park(rendezvous::Point::ReplayStarted).await;
 
     // 2. Fetch this lineage's pending commits plus cross-signing rows for the users they hint at (#987).
     // The DS reads head and batch in ONE transaction and refuses a non-contiguous batch, which makes the gap handling below safe.

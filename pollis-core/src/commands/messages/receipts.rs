@@ -4,8 +4,14 @@
 //! `reader_id` is always the MLS credential, so no member can forge another's receipt.
 //! "Read implies delivered" is enforced by a trigger in `local_schema.sql`.
 //! The `send_read_receipts` opt-out is reciprocal: off means no emitting and no recording.
+//!
+//! **Owed until sent.** A receipt this device owes is a `receipt_owed` row, written with the
+//! message it acknowledges (delivered) or when it is read, and cleared only once the DS took the
+//! envelope carrying it. [`drain_owed`] is the one way out: sealed under the DM's MLS lock and
+//! posted through `seal::post_resealing` like every message, so a staged commit, a commit that
+//! lands between seal and post, or a locked device delays a receipt but never drops it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use rusqlite::OptionalExtension;
@@ -99,99 +105,389 @@ pub(crate) fn record_transferred_receipt(
     record_receipt(conn, message_id, reader_id, kind, at, is_dm);
 }
 
-/// True when `conversation_id` is a DM.
-async fn is_dm(state: &Arc<AppState>, conversation_id: &str) -> Result<bool> {
-    let resolved = crate::commands::ds_reads::catch_up(state, conversation_id, false, false).await?;
-    Ok(resolved.kind == pollis_api::directory::ConversationKind::Dm)
+/// The most message ids one receipt frame carries; a longer backlog goes as several.
+const MAX_IDS_PER_RECEIPT: usize = 256;
+
+/// The receipts this device owes, kept until the DS has taken the envelope that carries them.
+///
+/// One row per `(conversation, kind, message)`. A delivered receipt is owed in the same
+/// savepoint that stores the message it acknowledges ([`owe_delivered_on`]), and a read one
+/// when the reader marks it read ([`mark_messages_read`]); only [`drain_owed`] clears a row,
+/// once its envelope landed, or when no receipt may be sent for it (not a DM any more, not a
+/// member, the opt-out). A read row carries the reader's own time (#2140); a delivered one is
+/// stamped when it is sealed. Created by the app's own open only (`LocalDb::open_at`), never by
+/// the extensions' opens; a file the app has not opened since the upgrade has no table, and
+/// then the pass that stores a message sends its receipt once, as before ([`drain_owed`]).
+pub(crate) const RECEIPT_OWED_DDL: &str = "CREATE TABLE IF NOT EXISTS receipt_owed (
+    conversation_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('delivered', 'read')),
+    read_at TEXT,
+    CHECK ((kind = 'read') = (read_at IS NOT NULL)),
+    PRIMARY KEY (conversation_id, kind, message_id)
+) WITHOUT ROWID";
+
+/// Whether this database has [`RECEIPT_OWED_DDL`]'s table.
+fn owed_table_exists(conn: &rusqlite::Connection) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'receipt_owed'",
+        [],
+        |_| Ok(()),
+    )
+    .optional()
+    .ok()
+    .flatten()
+    .is_some()
 }
 
-/// The emit chokepoint for both receipt kinds: DMs only, and the opt-out honoured.
-/// Seals at the current epoch without a catch-up: callers just finished one, and from ingest it would recurse.
-pub(crate) async fn emit_receipt(
-    state: &Arc<AppState>,
+/// Owe the delivered receipt for `message_id`, just stored in DM `conversation_id`. Called in
+/// the savepoint that stores the message, so a stored inbound DM message always has its receipt
+/// sent or owed. Nothing is owed while the opt-out is on. Never fails the store: a file the app
+/// has not opened since the upgrade has no table yet (see [`RECEIPT_OWED_DDL`]).
+pub(crate) fn owe_delivered_on(conn: &rusqlite::Connection, conversation_id: &str, message_id: &str) {
+    if !receipts_enabled(conn) {
+        return;
+    }
+    if let Err(e) = conn.execute(
+        "INSERT OR IGNORE INTO receipt_owed (conversation_id, message_id, kind, read_at)
+         VALUES (?1, ?2, 'delivered', NULL)",
+        rusqlite::params![conversation_id, message_id],
+    ) {
+        crate::diag!("[receipts] delivered receipt for {conversation_id} not recorded: {e}");
+    }
+}
+
+/// Owe read receipts for `message_ids` in `conversation_id`, read at `read_at`.
+fn owe_read_on(
+    conn: &rusqlite::Connection,
     conversation_id: &str,
-    kind: ReceiptKind,
     message_ids: &[String],
+    read_at: &str,
 ) -> Result<()> {
-    if message_ids.is_empty() {
+    if !receipts_enabled(conn) {
         return Ok(());
     }
-    // Scope gate, resolved against the DB rather than trusted from the caller.
-    let dm = is_dm(state, conversation_id).await?;
+    let tx = conn.unchecked_transaction()?;
+    for id in message_ids {
+        tx.execute(
+            "INSERT OR IGNORE INTO receipt_owed (conversation_id, message_id, kind, read_at)
+             VALUES (?1, ?2, 'read', ?3)",
+            rusqlite::params![conversation_id, id, read_at],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
 
-    let now = super::envelope_sent_at();
-    let envelope_id = ulid::Ulid::new().to_string();
-    // No in-process MLS lock here (see `try_seal_unlocked`), but the encrypt still advances this
-    // device's ratchet, so another process must not be mid-step on it (#1599). The cross-process
-    // share is reentrant within this state, so it cannot deadlock the catch-up that calls us.
-    let _cross_process = state.cross_process_lock().await?;
-    let sealed = {
+/// One receipt frame's worth of owed rows: a kind, the reader's time for a read, and the ids.
+#[derive(Debug, PartialEq, Eq)]
+struct OwedBatch {
+    kind: ReceiptKind,
+    /// `Some` for a read receipt (the reader's time), `None` for a delivered one.
+    read_at: Option<String>,
+    message_ids: Vec<String>,
+}
+
+/// What `conversation_id` owes, as frames of at most [`MAX_IDS_PER_RECEIPT`] ids: delivered
+/// first, then each read time on its own.
+fn owed_batches_on(conn: &rusqlite::Connection, conversation_id: &str) -> Result<Vec<OwedBatch>> {
+    let mut stmt = conn.prepare(
+        "SELECT kind, read_at, message_id FROM receipt_owed WHERE conversation_id = ?1
+         ORDER BY kind, read_at, message_id",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![conversation_id], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, Option<String>>(1)?,
+            r.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut out: Vec<OwedBatch> = Vec::new();
+    for row in rows {
+        let (kind, read_at, id) = row?;
+        let kind = match kind.as_str() {
+            "delivered" => ReceiptKind::Delivered,
+            "read" => ReceiptKind::Read,
+            _ => continue,
+        };
+        match out.last_mut() {
+            Some(last)
+                if last.kind == kind
+                    && last.read_at == read_at
+                    && last.message_ids.len() < MAX_IDS_PER_RECEIPT =>
+            {
+                last.message_ids.push(id);
+            }
+            _ => out.push(OwedBatch {
+                kind,
+                read_at,
+                message_ids: vec![id],
+            }),
+        }
+    }
+    Ok(out)
+}
+
+/// Clear the owed rows a landed receipt carried.
+fn settle_owed_on(conn: &rusqlite::Connection, conversation_id: &str, batch: &OwedBatch) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for id in &batch.message_ids {
+        tx.execute(
+            "DELETE FROM receipt_owed WHERE conversation_id = ?1 AND kind = ?2 AND message_id = ?3",
+            rusqlite::params![conversation_id, batch.kind.as_str(), id],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Clear everything `conversation_id` owes: no receipt may be sent for any of it.
+fn forget_owed_on(conn: &rusqlite::Connection, conversation_id: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM receipt_owed WHERE conversation_id = ?1",
+        rusqlite::params![conversation_id],
+    )?;
+    Ok(())
+}
+
+/// Which conversations have a [`drain_owed`] running in this process, and whether it must go
+/// round once more: a drain asked for while one runs never waits (it may be inside that very
+/// drain's re-seal catch-up); the running one picks its rows up.
+#[derive(Default)]
+pub struct ReceiptDrains(std::sync::Mutex<HashMap<String, bool>>);
+
+/// One conversation's running drain. Dropped (finished, failed or cancelled), it lets the next
+/// one start.
+struct DrainTurn<'a> {
+    drains: &'a ReceiptDrains,
+    conversation_id: String,
+}
+
+impl ReceiptDrains {
+    fn begin(&self, conversation_id: &str) -> Option<DrainTurn<'_>> {
+        let mut running = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(again) = running.get_mut(conversation_id) {
+            *again = true;
+            return None;
+        }
+        running.insert(conversation_id.to_string(), false);
+        Some(DrainTurn {
+            drains: self,
+            conversation_id: conversation_id.to_string(),
+        })
+    }
+}
+
+impl DrainTurn<'_> {
+    /// Whether a drain was asked for since this one began; clears the request.
+    fn again(&self) -> bool {
+        let mut running = self.drains.0.lock().unwrap_or_else(|e| e.into_inner());
+        running
+            .get_mut(&self.conversation_id)
+            .map(std::mem::take)
+            .unwrap_or(false)
+    }
+}
+
+impl Drop for DrainTurn<'_> {
+    fn drop(&mut self) {
+        let mut running = self.drains.0.lock().unwrap_or_else(|e| e.into_inner());
+        running.remove(&self.conversation_id);
+    }
+}
+
+/// THE way a receipt leaves this device: send what `conversation_id` owes.
+///
+/// Every caller goes through here: the catch-up pass that stored the messages (sweep, realtime
+/// wake, push fetch, mobile's concurrent ingest, a send's own catch-up), the committer once its
+/// commit is merged, `mark_messages_read`, and the outbox drain (unlock, reconnect, resume). Each
+/// frame is sealed under the DM's MLS lock and posted through `post_resealing`, which catches
+/// up and re-seals at the log head when a commit landed first (#1041), exactly as a message is;
+/// its rows are cleared only once the DS took it. A locked device (no delete capability, #1135)
+/// seals nothing and keeps what it owes for the next drain.
+///
+/// `unrecorded`: what the caller's pass just stored, sent from memory only when this database
+/// has no owed-receipt table yet (an extension's open before the app's first open since the
+/// upgrade, see [`RECEIPT_OWED_DDL`]). Ignored otherwise: those rows are already owed.
+pub(crate) async fn drain_owed(
+    state: &Arc<AppState>,
+    user_id: &str,
+    conversation_id: &str,
+    unrecorded: &[String],
+) -> Result<()> {
+    let Some(turn) = state.receipt_drains.begin(conversation_id) else {
+        // A drain is running here; it goes round again for whatever this one would send.
+        return Ok(());
+    };
+    let mut unrecorded = unrecorded;
+    loop {
+        drain_once(state, user_id, conversation_id, unrecorded).await?;
+        unrecorded = &[];
+        if !turn.again() {
+            return Ok(());
+        }
+    }
+}
+
+/// Send what every conversation owes: the outbox drain's share (unlock, reconnect, resume).
+pub(crate) async fn drain_all_owed(state: &Arc<AppState>) -> Result<()> {
+    let conversations: Vec<String> = {
+        let guard = state.local_db.lock().await;
+        let Some(db) = guard.as_ref() else {
+            return Ok(());
+        };
+        if !owed_table_exists(db.conn()) {
+            return Ok(());
+        }
+        super::strings_on(db.conn(), "SELECT DISTINCT conversation_id FROM receipt_owed")?
+    };
+    if conversations.is_empty() {
+        return Ok(());
+    }
+    let user_id = crate::commands::mls::ds_client::current_user_id(state).await?;
+    for conversation_id in conversations {
+        if let Err(e) = drain_owed(state, &user_id, &conversation_id, &[]).await {
+            crate::diag!("[receipts] owed receipts for {conversation_id} not sent yet: {e}");
+        }
+    }
+    Ok(())
+}
+
+/// What one frame's attempt came to.
+enum Sent {
+    /// The DS took it.
+    Landed,
+    /// The opt-out is on: nothing may be sent.
+    OptedOut,
+}
+
+async fn drain_once(
+    state: &Arc<AppState>,
+    user_id: &str,
+    conversation_id: &str,
+    unrecorded: &[String],
+) -> Result<()> {
+    let (recorded, batches) = {
         let guard = state.local_db.lock().await;
         let db = guard
             .as_ref()
             .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-        // Both gates together, under the same lock as the encrypt so the
-        // decision and the act cannot straddle a preference change.
-        if !receipts_permitted(dm, receipts_enabled(db.conn())) {
-            return Ok(());
+        if owed_table_exists(db.conn()) {
+            (true, owed_batches_on(db.conn(), conversation_id)?)
+        } else {
+            let batches = unrecorded
+                .chunks(MAX_IDS_PER_RECEIPT)
+                .map(|ids| OwedBatch {
+                    kind: ReceiptKind::Delivered,
+                    read_at: None,
+                    message_ids: ids.to_vec(),
+                })
+                .collect();
+            (false, batches)
         }
-        let plaintext = super::framing::pad_receipt(kind, &now, message_ids);
-        // A DM's MLS group is keyed by the conversation id directly.
-        let Some(sealed) =
-            super::seal::try_seal_unlocked(db.conn(), conversation_id, conversation_id, &plaintext)?
-        else {
-            // No local MLS group yet; a receipt is best-effort, so skip.
-            return Ok(());
-        };
-        // It will come back through this device's own fetch, undecryptable
-        // here (#1312).
-        super::loss::record_own_envelope(db.conn(), &envelope_id);
-        sealed
     };
-
-    // Sealed sender (#607) and a delete capability (#1086), like every envelope.
-    let delete_token_hash =
-        super::delete_capability::envelope_delete_token_hash(state, &envelope_id).await;
-    // The DS refuses an envelope with no capability (#1135); only a locked device lacks one, so skip.
-    let Some(delete_token_hash) = delete_token_hash else {
-        crate::diag!(
-            "[receipts] {kind:?} receipt for {conversation_id} skipped — this device \
-             cannot compute a delete capability (locked); the next ingest re-emits it"
-        );
+    if batches.is_empty() {
         return Ok(());
-    };
-    let body = pollis_api::messages::SendMessageBody {
-        id: envelope_id,
-        conversation_id: conversation_id.to_string(),
-        sender_id: Some(super::send::SEALED_SENDER_SENTINEL.to_string()),
-        ciphertext: sealed.wire(),
-        // A receipt is not a reply.
-        reply_to_id: None,
-        sent_at: sealed.sent_at.clone(),
-        sealed: 1,
-        generation: Some(sealed.generation),
-        epoch: Some(sealed.epoch),
-        // A receipt frame wakes nobody: it is an acknowledgement of
-        // something the recipient already has (#987).
-        push_to: None,
-        push_mentions: None,
-        delete_token_hash: Some(delete_token_hash),
-    };
-    // No re-seal loop: callers may hold the group lock; an epoch-behind receipt is re-emitted later.
-    match crate::commands::mls::ds_post_envelope(state, &body).await? {
-        crate::commands::mls::EnvelopePost::Landed => {}
-        crate::commands::mls::EnvelopePost::EpochBehind {
-            head_generation,
-            head_epoch,
-        } => {
-            crate::diag!(
-                "[receipts] {kind:?} receipt for {conversation_id} sealed at ({}, {}) but the \
-                 log head is ({head_generation}, {head_epoch}) — skipped",
-                sealed.generation, sealed.epoch
-            );
-            return Ok(());
+    }
+    // The DS refuses an envelope with no delete capability (#1135); only a locked device (a
+    // notification extension) lacks one. Nothing is sealed, and the rows wait for the app.
+    if !super::delete_capability::has_delete_capability(state).await {
+        return Ok(());
+    }
+    // Scope gate, resolved against the DS rather than trusted from the caller: DMs only (#857).
+    let resolved = crate::commands::ds_reads::catch_up(state, conversation_id, false, false).await?;
+    let dm = resolved.kind == pollis_api::directory::ConversationKind::Dm;
+    if !resolved.authorized || !dm {
+        if recorded {
+            super::with_local_conn(state, |conn| forget_owed_on(conn, conversation_id)).await?;
+        }
+        return Ok(());
+    }
+    for batch in batches {
+        let sent = match deliver_batch(state, user_id, conversation_id, &batch).await {
+            Ok(sent) => sent,
+            // A refusal no retry fixes (#1335's rule): these can never go.
+            Err(e) if super::outbox::is_permanent(&e) => {
+                crate::diag!("[receipts] receipts for {conversation_id} refused for good: {e}");
+                Sent::OptedOut
+            }
+            Err(e) => return Err(e),
+        };
+        if !recorded {
+            continue;
+        }
+        match sent {
+            Sent::Landed => {
+                super::with_local_conn(state, |conn| settle_owed_on(conn, conversation_id, &batch))
+                    .await?
+            }
+            Sent::OptedOut => {
+                super::with_local_conn(state, |conn| forget_owed_on(conn, conversation_id)).await?;
+                return Ok(());
+            }
         }
     }
+    Ok(())
+}
+
+/// Seal one receipt frame under the DM's MLS lock and post it like any envelope.
+async fn deliver_batch(
+    state: &Arc<AppState>,
+    user_id: &str,
+    conversation_id: &str,
+    batch: &OwedBatch,
+) -> Result<Sent> {
+    let envelope_id = ulid::Ulid::new().to_string();
+    let Some(delete_token_hash) =
+        super::delete_capability::envelope_delete_token_hash(state, &envelope_id).await
+    else {
+        return Err(Error::Other(anyhow::anyhow!(
+            "locked: no delete capability for the receipt envelope"
+        )));
+    };
+    // A delivered receipt is stamped now; a read one carries the reader's own time (#2140).
+    let at = batch
+        .read_at
+        .clone()
+        .unwrap_or_else(super::envelope_sent_at);
+    let plaintext = super::framing::pad_receipt(batch.kind, &at, &batch.message_ids);
+    // A DM's MLS group is keyed by the conversation id directly. The opt-out is read under the
+    // same lock as the seal, so the decision and the act cannot straddle a preference change.
+    let sealed = super::seal::with_sealing_lock(state, conversation_id, |conn, held| {
+        if !receipts_enabled(conn) {
+            return Ok(None);
+        }
+        super::seal::seal_under_lock(conn, conversation_id, conversation_id, &plaintext, held).map(Some)
+    })
+    .await?;
+    let Some(sealed) = sealed else {
+        return Ok(Sent::OptedOut);
+    };
+    // Sealed sender (#607) and a delete capability (#1086), like every envelope. It will come
+    // back through this device's own fetch, undecryptable here (#1312): `post_resealing`
+    // records it as this device's own first.
+    super::seal::post_resealing(
+        state,
+        super::seal::Target {
+            mls_group_id: conversation_id,
+            conversation_id,
+            user_id,
+            plaintext: &plaintext,
+            envelope_id: &envelope_id,
+        },
+        sealed,
+        // A receipt wakes nobody: it acknowledges something the recipient already has (#987).
+        |sealed| {
+            super::seal::control_envelope(
+                &envelope_id,
+                conversation_id,
+                sealed,
+                Some(delete_token_hash.clone()),
+            )
+        },
+        |_conn, _sealed| Ok(()),
+    )
+    .await?;
 
     // Wake the peers. Deliberately the same `new_message` wake as a message (#1628): realtime
     // data packets are not end-to-end encrypted (RoomOptions::default()), so a distinct type
@@ -207,25 +503,36 @@ pub(crate) async fn emit_receipt(
     {
         crate::diag!("[receipts] publish hint for {conversation_id}: {e}");
     }
-
-    Ok(())
+    Ok(Sent::Landed)
 }
 
-/// Emit **delivered** receipts for messages this device just fetched and
-/// decrypted. Called by the ingest path; see [`emit_receipt`] for the gates.
-pub(crate) async fn emit_delivered(
-    state: &Arc<AppState>,
-    conversation_id: &str,
-    message_ids: &[String],
-) -> Result<()> {
-    emit_receipt(state, conversation_id, ReceiptKind::Delivered, message_ids).await
+/// Send the delivered receipts a catch-up pass owes, for each of `conversations` (with what it
+/// just stored there, see [`drain_owed`]'s `unrecorded`). Failures are logged: what is owed
+/// stays owed.
+///
+/// Type-erased: a receipt's re-seal runs a catch-up whose tail calls this again, and the
+/// compiler can only prove that recursive future `Send` across a boundary like this one.
+pub(crate) fn send_owed<'a>(
+    state: &'a Arc<AppState>,
+    user_id: &'a str,
+    conversations: &'a [(String, Vec<String>)],
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+    Box::pin(async move {
+        for (conversation_id, stored) in conversations {
+            if let Err(e) = drain_owed(state, user_id, conversation_id, stored).await {
+                crate::diag!("[receipts] receipts for {conversation_id} not sent yet: {e}");
+            }
+        }
+    })
 }
 
-/// Mark messages as **actually read by the human** and emit a read receipt.
+/// Mark messages as **actually read by the human** and send a read receipt.
 ///
 /// Called only for messages genuinely on screen in a focused window.
 ///
-/// Only others' messages this device holds are acknowledged.
+/// Only others' messages this device holds are acknowledged. The receipt is owed before this
+/// returns, then sent through [`drain_owed`] in the background; a failure to send leaves it
+/// owed, so this never fails for it.
 pub async fn mark_messages_read(
     conversation_id: String,
     user_id: String,
@@ -235,12 +542,13 @@ pub async fn mark_messages_read(
     if message_ids.is_empty() {
         return Ok(());
     }
-    let to_ack: Vec<String> = {
+    let read_at = super::envelope_sent_at();
+    {
         let guard = state.local_db.lock().await;
         let db = guard
             .as_ref()
             .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-        let mut out = Vec::new();
+        let mut to_ack = Vec::new();
         for id in &message_ids {
             let author: Option<String> = db
                 .conn()
@@ -255,13 +563,24 @@ pub async fn mark_messages_read(
                 .flatten();
             // Present, and not ours.
             if author.is_some_and(|a| a != user_id) {
-                out.push(id.clone());
+                to_ack.push(id.clone());
             }
         }
-        out
-    };
+        if to_ack.is_empty() {
+            return Ok(());
+        }
+        owe_read_on(db.conn(), &conversation_id, &to_ack, &read_at)?;
+    }
 
-    emit_receipt(state, &conversation_id, ReceiptKind::Read, &to_ack).await
+    // Owed now; sent in its own task, so marking never waits behind a committer holding the
+    // DM's MLS lock (the seal needs it). A drain that never runs leaves it owed for the next.
+    let task_state = Arc::clone(state);
+    state.spawn_background(async move {
+        if let Err(e) = drain_owed(&task_state, &user_id, &conversation_id, &[]).await {
+            crate::diag!("[receipts] read receipt for {conversation_id} not sent yet: {e}");
+        }
+    });
+    Ok(())
 }
 
 /// Every receipt this device holds for the messages of one conversation.
@@ -512,6 +831,114 @@ mod tests {
             )
             .unwrap();
         assert_eq!(at, "t-first");
+    }
+
+    fn owed_rows(conn: &rusqlite::Connection) -> Vec<(String, String, String, Option<String>)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT conversation_id, message_id, kind, read_at FROM receipt_owed
+                 ORDER BY conversation_id, kind, message_id",
+            )
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    /// An owed read receipt always has the reader's time and a delivered one never does: the
+    /// table refuses either shape, so a frame can never go out with no time or a wrong one.
+    #[test]
+    fn an_owed_receipt_without_its_time_is_unrepresentable() {
+        let db = db();
+        for (kind, read_at) in [("read", None), ("delivered", Some("t0")), ("seen-ish", None)] {
+            let err = db.conn().execute(
+                "INSERT INTO receipt_owed (conversation_id, message_id, kind, read_at)
+                 VALUES ('dm1', 'm1', ?1, ?2)",
+                rusqlite::params![kind, read_at],
+            );
+            assert!(err.is_err(), "{kind} with read_at {read_at:?} must not be storable");
+        }
+    }
+
+    /// A stored message owes its delivered receipt once, whatever re-stores it; the opt-out owes
+    /// nothing.
+    #[test]
+    fn a_delivered_receipt_is_owed_once_and_not_while_opted_out() {
+        let db = db();
+        owe_delivered_on(db.conn(), "dm1", "m1");
+        owe_delivered_on(db.conn(), "dm1", "m1");
+        assert_eq!(
+            owed_rows(db.conn()),
+            vec![("dm1".into(), "m1".into(), "delivered".into(), None)]
+        );
+        set_pref(db.conn(), r#"{"send_read_receipts":false}"#);
+        owe_delivered_on(db.conn(), "dm1", "m2");
+        owe_read_on(db.conn(), "dm1", &["m1".to_string()], "t1").unwrap();
+        assert_eq!(owed_rows(db.conn()).len(), 1, "nothing is owed while opted out");
+    }
+
+    /// What is owed goes out as frames: delivered together, each read time on its own, and no
+    /// frame over the cap. Clearing one frame's rows leaves the rest owed.
+    #[test]
+    fn owed_receipts_are_sent_as_bounded_frames_and_cleared_per_frame() {
+        let db = db();
+        let many: Vec<String> = (0..MAX_IDS_PER_RECEIPT + 3).map(|i| format!("m{i:04}")).collect();
+        for id in &many {
+            owe_delivered_on(db.conn(), "dm1", id);
+        }
+        owe_read_on(db.conn(), "dm1", &["r1".to_string(), "r2".to_string()], "t-early").unwrap();
+        owe_read_on(db.conn(), "dm1", &["r3".to_string()], "t-late").unwrap();
+        owe_delivered_on(db.conn(), "dm2", "other");
+
+        let batches = owed_batches_on(db.conn(), "dm1").unwrap();
+        let shape: Vec<(ReceiptKind, Option<&str>, usize)> = batches
+            .iter()
+            .map(|b| (b.kind, b.read_at.as_deref(), b.message_ids.len()))
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (ReceiptKind::Delivered, None, MAX_IDS_PER_RECEIPT),
+                (ReceiptKind::Delivered, None, 3),
+                (ReceiptKind::Read, Some("t-early"), 2),
+                (ReceiptKind::Read, Some("t-late"), 1),
+            ]
+        );
+
+        settle_owed_on(db.conn(), "dm1", &batches[2]).unwrap();
+        let left = owed_batches_on(db.conn(), "dm1").unwrap();
+        assert_eq!(left.len(), 3, "only the landed frame's rows are cleared");
+        assert!(left.iter().all(|b| b.read_at.as_deref() != Some("t-early")));
+
+        forget_owed_on(db.conn(), "dm1").unwrap();
+        assert!(owed_batches_on(db.conn(), "dm1").unwrap().is_empty());
+        assert_eq!(owed_batches_on(db.conn(), "dm2").unwrap().len(), 1, "other DMs untouched");
+    }
+
+    /// A database the app has not opened since the upgrade (an extension's open) has no table:
+    /// storing a message still works, and nothing claims to be owed.
+    #[test]
+    fn a_database_without_the_table_still_stores_and_owes_nothing() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::local::apply_local_schema(&conn).unwrap();
+        assert!(!owed_table_exists(&conn));
+        owe_delivered_on(&conn, "dm1", "m1");
+        assert!(!owed_table_exists(&conn));
+    }
+
+    /// A drain asked for while one runs does not start a second; the running one goes round
+    /// again, and the turn ends when it is dropped, however it ended.
+    #[test]
+    fn a_drain_asked_for_while_one_runs_makes_it_go_round_again() {
+        let drains = ReceiptDrains::default();
+        let turn = drains.begin("dm1").expect("the first drain runs");
+        assert!(drains.begin("dm1").is_none(), "a second drain never runs beside it");
+        assert!(drains.begin("dm2").is_some(), "other conversations drain freely");
+        assert!(turn.again(), "the request made meanwhile is not lost");
+        assert!(!turn.again(), "and is taken once");
+        drop(turn);
+        assert!(drains.begin("dm1").is_some(), "a dropped turn frees the conversation");
     }
 
     /// The read time is the read receipt's own timestamp, one per reader, and only for readers

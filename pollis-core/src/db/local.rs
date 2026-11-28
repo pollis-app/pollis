@@ -251,6 +251,9 @@ impl LocalDb {
         // Before the schema batch, which indexes one of these columns.
         add_missing_columns(&conn)?;
         apply_local_schema(&conn)?;
+        // The receipts this device owes; the app's open only, like the indexes below. Additive
+        // and idempotent: an older build ignores the table.
+        conn.execute_batch(crate::commands::messages::RECEIPT_OWED_DDL)?;
         // The app's open only, never `open_existing_for_user_in` (#2171, #2172).
         upgrade_message_indexes(&conn, data_dir, lock);
         // A killed earlier process's outbox claims (#2100): nothing of it is live.
@@ -274,7 +277,8 @@ impl LocalDb {
     /// error, not a reason to destroy the file: the app owns the database, and a stale notification
     /// key must never cost the user their history. Nothing that assumes "no other process is using
     /// this file" (the orphan-attachment sweep, eviction) runs here, and no index is ever built
-    /// here ([`MESSAGE_INDEXES`] belong to the app's own open).
+    /// here ([`MESSAGE_INDEXES`] belong to the app's own open), nor the owed-receipt table
+    /// (`messages::RECEIPT_OWED_DDL`, the app's open too).
     pub fn open_existing_for_user_in(
         data_dir: &std::path::Path,
         user_id: &str,
@@ -315,6 +319,7 @@ impl LocalDb {
         conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;")?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         apply_local_schema(&conn)?;
+        conn.execute_batch(crate::commands::messages::RECEIPT_OWED_DDL)?;
         apply_message_indexes(&conn)?;
         Ok(Self { conn })
     }

@@ -3,9 +3,10 @@
 //! Not a loss: messages sent before joining, and this device's own control frames.
 
 use crate::harness::{
-    arm_ds_fault, clear_ds_fault, ds_head_epoch, ds_head_generation, ds_prune_commit_log,
+    arm_ds_fault, clear_ds_fault, ds_fault_armed, ds_head_epoch, ds_head_generation, ds_prune_commit_log,
     enroll_second_device, expect_losses, local_generation_of, prune_commits_below,
-    republish_key_packages, retire_generations_below, set_current_suite, wipe, DsFault, TestClient,
+    parked_at, republish_key_packages, retire_generations_below, set_current_suite, wipe, DsFault,
+    TestClient,
     SUITE_LEGACY,
 };
 use pollis_lib::commands::auth::UserProfile;
@@ -568,4 +569,102 @@ async fn own_control_frames_and_sibling_devices_are_not_losses() {
         assert!(contents(&msgs).contains(&"hi back"), "{msgs:#?}");
         assert!(contents(&msgs).contains(&"hi from d2"), "{msgs:#?}");
     }
+}
+
+/// A re-add Welcome replaces the group this device still holds. A catch-up pass that started on
+/// that held group, and holds its MLS lock, finishes on it before the Welcome may replace it:
+/// were the Welcome applied under it, the pass would apply the held group's commits to the
+/// Welcome's group, destroy it and rejoin later, and what was sealed in between would be lost.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_re_add_welcome_waits_for_a_pass_holding_the_group() {
+    use pollis_core::commands::mls::rendezvous::{self, Point};
+
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Held").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    add_member(&alice, &group_id, &channel_id, &bob, &bob_p).await;
+    alice.send_channel_message(&channel_id, "read in time").await;
+    assert!(contents(&bob.fetch_channel_messages(&channel_id).await).contains(&"read in time"));
+
+    // Bob is removed and re-added while away; his device still holds the group from before.
+    alice.remove_member(&group_id, &bob_p.id).await;
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "while bob is out").await;
+    alice.invite(&group_id, &bob_p.username).await;
+    let invite_id = bob.first_pending_invite().await.expect("pending invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    alice.process_commits_for(&channel_id).await;
+    // Sealed at the epoch the Welcome admits bob at.
+    alice.send_channel_message(&channel_id, "bob is back").await;
+
+    // Bob's drain: its replay of the held group fails midway, so the group stays where it was.
+    // Park the drain before it applies the Welcome.
+    arm_ds_fault(DsFault::CatchUpTimesOutMidway);
+    let mut before_apply = rendezvous::arm(Point::WelcomeBeforeApply);
+    bob.activate();
+    let drain = {
+        let state = bob.state.clone();
+        let user = bob_p.id.clone();
+        tokio::spawn(async move { pollis_core::commands::mls::poll_mls_welcomes(&state, user).await })
+    };
+    let release_drain = parked_at(&mut before_apply, "bob's drain never reached the Welcome").await;
+    rendezvous::disarm(Point::WelcomeBeforeApply);
+    assert!(!ds_fault_armed(), "the held group's replay must have failed, or this proves nothing");
+
+    // A pass for the group starts on the held group and parks holding its lock.
+    let mut started = rendezvous::arm(Point::ReplayStarted);
+    let pass = {
+        let state = bob.state.clone();
+        let (group, user) = (group_id.clone(), bob_p.id.clone());
+        tokio::spawn(async move {
+            pollis_core::commands::messages::catch_up_mls_group_interleaved(&state, &group, &user).await
+        })
+    };
+    let release_pass = parked_at(&mut started, "the pass never started on the held group").await;
+    rendezvous::disarm(Point::ReplayStarted);
+
+    // The drain goes on until it waits behind the pass (for the group's lock or its catch-up),
+    // or ends without ever waiting.
+    let mut contended = rendezvous::arm(Point::MlsLockContended);
+    let mut behind_pass = rendezvous::arm(Point::CatchUpWaiting);
+    let _ = release_drain.send(());
+    let mut drain = drain;
+    let waiting = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::select! {
+            r = contended.recv() => Some(r.expect("rendezvous closed")),
+            r = behind_pass.recv() => Some(r.expect("rendezvous closed")),
+            done = &mut drain => {
+                done.expect("drain task").expect("poll_mls_welcomes");
+                None
+            }
+        }
+    })
+    .await
+    .expect("the drain neither waited behind the pass nor finished");
+    rendezvous::disarm(Point::MlsLockContended);
+    rendezvous::disarm(Point::CatchUpWaiting);
+    let drained = waiting.is_none();
+    if let Some(waiting) = waiting {
+        let _ = waiting.send(());
+    }
+    let _ = release_pass.send(());
+    pass.await.expect("pass task").expect("catch-up");
+    if !drained {
+        drain.await.expect("drain task").expect("poll_mls_welcomes");
+    }
+
+    let msgs = bob.fetch_channel_messages(&channel_id).await;
+    let got = contents(&msgs);
+    assert!(got.contains(&"bob is back"), "sealed at bob's Welcome epoch, so it opens: {msgs:#?}");
+    assert!(!got.contains(&"while bob is out"), "{msgs:#?}");
+    assert!(placeholders(&msgs).is_empty(), "nothing was lost: {msgs:#?}");
 }

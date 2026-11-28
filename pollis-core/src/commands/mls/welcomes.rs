@@ -18,10 +18,16 @@ use super::provider::{welcome_ciphersuite, MlsProvider, PollisProvider};
 /// Returns the `(conversation_id, generation)` joined, for the post-join self-update (#666).
 ///
 /// The generation comes from the GroupId, since a migrated group's Welcome admits us to the successor (#454).
+///
+/// Only under the lock of the group it joins: `held` is that witness, and a Welcome for any
+/// other group is refused. A catch-up pass replays its group under the same lock, so no pass
+/// can be between reading its group's epoch and applying commits to it while a Welcome
+/// replaces that group (it would apply the old group's commits to the new one, destroy it,
+/// and rejoin later, losing what was sealed in between).
 pub async fn apply_welcome(
     state: &Arc<AppState>,
     welcome_bytes: &[u8],
-    expected_conversation_id: Option<&str>,
+    held: &crate::state::MlsLockHeld<'_>,
 ) -> Result<(String, i64)> {
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| {
@@ -47,7 +53,7 @@ pub async fn apply_welcome(
     })?;
 
     let provider = PollisProvider::new(db.conn());
-    let raw_group_id = join_from_welcome(&provider, welcome, expected_conversation_id)?;
+    let raw_group_id = join_from_welcome(&provider, welcome, Some(held.group()))?;
     Ok(super::generation::split_mls_group_id(&raw_group_id))
 }
 
@@ -141,14 +147,23 @@ where
     Ok(raw_group_id)
 }
 
-/// The conversation whose CONFIRMED group this Welcome would replace, if any:
-/// a re-add into a lineage this device still holds below the Welcome's epoch
-/// (#1772).
+/// What a Welcome would do on this device, read before anything is joined.
+struct WelcomePeek {
+    /// The lineage (conversation) it joins: the group whose lock its apply takes.
+    conversation_id: String,
+    /// It re-adds this device into a lineage whose CONFIRMED group it still holds below the
+    /// Welcome's epoch (#1772), so that group is replayed first.
+    replaces_held: bool,
+}
+
+/// [`WelcomePeek`] for one Welcome; `None` when it cannot be opened here (its apply fails the
+/// same way).
 ///
 /// Opening a Welcome consumes its KeyPackage, so the peek runs inside a
-/// savepoint that is always rolled back. Nothing it reads is trusted: an
-/// answer only decides whether to replay a group this device already holds.
-fn welcome_replaces_held_group(conn: &rusqlite::Connection, welcome_bytes: &[u8]) -> Option<String> {
+/// savepoint that is always rolled back. Nothing it reads is trusted: the answer
+/// only picks the group whose lock the apply takes (the apply then refuses a
+/// Welcome for any other group) and whether to replay a group this device holds.
+fn peek_welcome(conn: &rusqlite::Connection, welcome_bytes: &[u8]) -> Option<WelcomePeek> {
     let mut reader: &[u8] = welcome_bytes;
     let MlsMessageBodyIn::Welcome(welcome) = MlsMessageIn::tls_deserialize(&mut reader).ok()?.extract()
     else {
@@ -156,27 +171,30 @@ fn welcome_replaces_held_group(conn: &rusqlite::Connection, welcome_bytes: &[u8]
     };
     welcome_ciphersuite(&welcome)?;
     conn.execute_batch("SAVEPOINT welcome_peek").ok()?;
-    let target = {
+    let peek = {
         let provider = PollisProvider::new(conn);
         ProcessedWelcome::new_from_welcome(&provider, &super::provider::join_config(), welcome)
             .ok()
             .and_then(|processed| {
                 let group_id = processed.unverified_group_info().group_id().clone();
                 let welcome_epoch = processed.unverified_group_info().epoch().as_u64();
-                let local_epoch = MlsGroup::load(provider.storage(), &group_id)
-                    .ok()
-                    .flatten()?
-                    .epoch()
-                    .as_u64();
                 let raw = String::from_utf8(group_id.as_slice().to_vec()).ok()?;
                 let (conversation_id, generation) = super::generation::split_mls_group_id(&raw);
+                let local_epoch = MlsGroup::load(provider.storage(), &group_id)
+                    .ok()
+                    .flatten()
+                    .map(|group| group.epoch().as_u64());
                 let confirmed =
                     !super::join_branch::is_unconfirmed(conn, &conversation_id, generation);
-                (confirmed && local_epoch < welcome_epoch).then_some(conversation_id)
+                let replaces_held = confirmed && local_epoch.is_some_and(|e| e < welcome_epoch);
+                Some(WelcomePeek {
+                    conversation_id,
+                    replaces_held,
+                })
             })
     };
     let _ = conn.execute_batch("ROLLBACK TO welcome_peek; RELEASE welcome_peek");
-    target
+    peek
 }
 
 /// One leaf of a Welcome's tree: `(user, device, signature key, scheme)`.
@@ -265,15 +283,81 @@ async fn welcome_admits_never_certified_leaf(
     })
 }
 
+tokio::task_local! {
+    /// Set while this task runs a Welcome drain, so a poll it causes (a replay that found a
+    /// group missing) is owed to it instead of starting a second drain inside the first.
+    static DRAINING: ();
+}
+
+/// Whether a Welcome drain may start in this task now; when not, the poll is owed.
+///
+/// A drain waits on other groups' catch-ups (it replays the groups its Welcomes replace) and
+/// takes each joined group's MLS lock. Inside a catch-up pass, which holds its own group's
+/// catch-up and, while replaying, its MLS lock, that wait could close a cycle with another
+/// task doing the same the other way round. So it never runs there: the poll is owed and the
+/// outermost catch-up runs it once it holds nothing ([`drain_owed_welcomes`]). A drain never
+/// waits while holding anything but the cross-process share, which every MLS section shares.
+fn may_drain_now(state: &AppState) -> bool {
+    let nested = crate::commands::messages::ingest_guard::in_catch_up_pass()
+        || DRAINING.try_with(|_| ()).is_ok();
+    if nested {
+        state
+            .welcome_poll_owed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    !nested
+}
+
+/// Run a Welcome poll [`may_drain_now`] owed, if this task now may: what the outermost
+/// catch-up does once its pass is done and its locks are released.
+pub(crate) async fn drain_owed_welcomes(state: &Arc<AppState>, user_id: &str) {
+    if crate::commands::messages::ingest_guard::in_catch_up_pass()
+        || DRAINING.try_with(|_| ()).is_ok()
+        || !state.welcome_poll_owed.load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return;
+    }
+    let device_id = state.device_id.lock().await.clone();
+    if let Some(device_id) = device_id {
+        if let Err(e) = poll_mls_welcomes_inner(state, user_id, &device_id).await {
+            crate::diag!("[mls] owed welcome poll: {e}");
+        }
+    }
+}
+
 /// Poll the remote `mls_welcome` table for undelivered Welcome messages
 /// addressed to `user_id`.  Each one is applied locally and then marked
 /// `delivered = 1` so it is not processed again.
+///
+/// Inside a catch-up pass it drains nothing and the poll is owed instead ([`may_drain_now`]).
 pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, device_id: &str) -> Result<()> {
-    // Fetch-to-ack under the cross-process lock (#1599): a second process draining the same
-    // Welcome would join the group a second time over the first's state.
-    let _cross_process = state.cross_process_lock().await?;
-    let follow_up = drain_welcomes(state, user_id, device_id).await?;
-    follow_up.run(state, user_id, device_id).await;
+    if !may_drain_now(state) {
+        crate::diag!("[mls] poll_mls_welcomes: inside a catch-up pass; owed until it ends");
+        return Ok(());
+    }
+    // At most one more drain for a poll owed while this one ran: bounded, never a loop.
+    for _ in 0..2 {
+        // This drain's own fetch answers any poll owed before it.
+        state
+            .welcome_poll_owed
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        DRAINING
+            .scope((), async {
+                // Fetch-to-ack under the cross-process lock (#1599): a second process draining
+                // the same Welcome would join the group a second time over the first's state.
+                let _cross_process = state.cross_process_lock().await?;
+                let follow_up = drain_welcomes(state, user_id, device_id).await?;
+                follow_up.run(state, user_id, device_id).await;
+                Ok::<(), crate::error::Error>(())
+            })
+            .await?;
+        if !state
+            .welcome_poll_owed
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            break;
+        }
+    }
     Ok(())
 }
 
@@ -286,10 +370,19 @@ pub async fn poll_mls_welcomes_deferring(
     user_id: &str,
     device_id: &str,
 ) -> Result<()> {
-    let follow_up = {
-        let _cross_process = state.cross_process_lock().await?;
-        drain_welcomes(state, user_id, device_id).await?
-    };
+    if !may_drain_now(state) {
+        crate::diag!("[mls] poll_mls_welcomes: inside a catch-up pass; owed until it ends");
+        return Ok(());
+    }
+    state
+        .welcome_poll_owed
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let follow_up = DRAINING
+        .scope((), async {
+            let _cross_process = state.cross_process_lock().await?;
+            drain_welcomes(state, user_id, device_id).await
+        })
+        .await?;
     if follow_up.is_empty() {
         return Ok(());
     }
@@ -358,20 +451,19 @@ async fn drain_welcomes(
     // was sealed to it before its removal opens now instead of being lost, and
     // the replay reaches the commit that removed it, which proves exactly
     // where the time out of the tree began.
-    let held_below: Vec<String> = {
+    let peeks: Vec<Option<WelcomePeek>> = {
         let guard = state.local_db.lock().await;
-        let mut out: Vec<String> = Vec::new();
-        if let Some(db) = guard.as_ref() {
-            for item in &items {
-                if let Some(conversation_id) = welcome_replaces_held_group(db.conn(), &item.bytes) {
-                    if !out.contains(&conversation_id) {
-                        out.push(conversation_id);
-                    }
-                }
-            }
+        match guard.as_ref() {
+            Some(db) => items.iter().map(|item| peek_welcome(db.conn(), &item.bytes)).collect(),
+            None => items.iter().map(|_| None).collect(),
         }
-        out
     };
+    let mut held_below: Vec<String> = Vec::new();
+    for peek in peeks.iter().flatten() {
+        if peek.replaces_held && !held_below.contains(&peek.conversation_id) {
+            held_below.push(peek.conversation_id.clone());
+        }
+    }
     for conversation_id in &held_below {
         crate::diag!(
             "[mls] poll_mls_welcomes: a Welcome re-adds this device to {conversation_id}, whose \
@@ -395,11 +487,14 @@ async fn drain_welcomes(
     let mut failed: Vec<String> = Vec::new();
     // Joined lineages, deduped per conversation, highest generation wins (#666, #454).
     let mut joined: Vec<(String, i64)> = Vec::new();
-    for super::ds_reads::FetchedWelcome {
-        id,
-        bytes,
-        conversation_id: filed_under,
-    } in items
+    for (
+        super::ds_reads::FetchedWelcome {
+            id,
+            bytes,
+            conversation_id: filed_under,
+        },
+        peek,
+    ) in items.into_iter().zip(peeks)
     {
         // #1851: never join a tree holding a leaf its account never certified.
         // Acked and re-joined like any failed Welcome; the external join
@@ -430,8 +525,37 @@ async fn drain_welcomes(
             processed_ids.push(id);
             continue;
         }
-        // `None`: the corroboration below stands in for the filed-under check.
-        match apply_welcome(state, &bytes, None).await {
+        // Test-harness only: park a drain with its replays done and this Welcome not applied.
+        #[cfg(feature = "test-harness")]
+        super::rendezvous::park(super::rendezvous::Point::WelcomeBeforeApply).await;
+        // Test-harness only: park a drain with its replays done and this Welcome not applied.
+        #[cfg(feature = "test-harness")]
+        super::rendezvous::park(super::rendezvous::Point::WelcomeBeforeApply).await;
+        // Applied under the lock of the group it joins, taken now that the replays above are
+        // done (the lock is not re-entrant): a pass that started on the held group finishes
+        // first, and `join_from_welcome` re-checks `welcome_may_replace` against whatever it
+        // left. The corroboration below stands in for the filed-under check.
+        let applied = match peek {
+            Some(peek) => {
+                let guard = match state.mls_group_lock(&peek.conversation_id).await {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        // Not acknowledged: the next drain applies it.
+                        crate::diag!(
+                            "[mls] poll_mls_welcomes: welcome {id} left for the next drain, its \
+                             group's lock is unavailable: {e}"
+                        );
+                        continue;
+                    }
+                };
+                let held = crate::state::MlsLockHeld::from_guard(&guard);
+                apply_welcome(state, &bytes, &held).await
+            }
+            None => Err(crate::error::Error::Other(anyhow::anyhow!(
+                "welcome cannot be opened on this device"
+            ))),
+        };
+        match applied {
             Ok((conversation_id, generation)) => {
                 crate::diag!("[mls] poll_mls_welcomes: applied welcome {id}");
                 if welcome_is_corroborated(state, &conversation_id, generation).await {

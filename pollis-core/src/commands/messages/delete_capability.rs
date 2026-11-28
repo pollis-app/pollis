@@ -58,6 +58,11 @@ async fn unlocked_account_seed(
     guard.as_ref().map(|u| u.account_id_key.to_vec())
 }
 
+/// Whether this device can compute delete capabilities now: false while locked.
+pub(super) async fn has_delete_capability(state: &std::sync::Arc<crate::state::AppState>) -> bool {
+    unlocked_account_seed(state).await.is_some()
+}
+
 /// The capability hash to attach to an envelope this device is about to write.
 /// `None` when the account key is unavailable; a send must never fail for lack of a capability.
 pub(super) async fn envelope_delete_token_hash(

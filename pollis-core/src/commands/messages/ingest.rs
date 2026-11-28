@@ -252,12 +252,16 @@ pub fn catch_up_mls_group_interleaved<'a>(
     catch_up_interleaved(state, mls_group_id, user_id, None)
 }
 
-/// A catch-up read made before a seal (#2141), with the [`PassClock`] reading taken before it.
+/// A catch-up read made before a seal (#2141), with the [`PassClock`] reading and the
+/// [`ReadMark`] taken before it.
 ///
 /// [`PassClock`]: super::ingest_guard::PassClock
+/// [`ReadMark`]: super::ingest_guard::ReadMark
 pub struct PrefetchedCatchUp {
     pub response: pollis_api::directory::CatchUpResponse,
     pub clock: Option<u64>,
+    /// The catch-up requests this read answers for: those made before it was sent.
+    pub mark: super::ingest_guard::ReadMark,
 }
 
 /// [`catch_up_mls_group_interleaved`] applying `fetched` instead of reading again (#2141): one
@@ -300,11 +304,13 @@ async fn catch_up_interleaved(
     // Boxed: the largest future on the receive path (#1571 overflowed a test stack).
     // Single-flight per group (#1629): an overlapping pass would open the same envelopes again.
     let flights = &state.catch_up_flights;
-    let once = || {
+    let once = |mark| {
         let prefetched = fetched.lock().unwrap_or_else(|e| e.into_inner()).take();
-        Box::pin(catch_up_once(state, mls_group_id, user_id, prefetched))
+        Box::pin(catch_up_once(state, mls_group_id, user_id, prefetched, mark))
     };
     super::ingest_guard::coalesced(flights, mls_group_id, once).await?;
+    // A Welcome poll the pass owed (no group, no GroupInfo, #832) runs now that it holds nothing.
+    Box::pin(crate::commands::mls::drain_owed_welcomes(state, user_id)).await;
     // A pass that started with no group could only join; run one more pass now (#1571) to show what it holds.
     if !held_before && held(state).await {
         super::ingest_guard::coalesced(flights, mls_group_id, once).await?;
@@ -322,12 +328,15 @@ async fn catch_up_interleaved(
     Ok(())
 }
 
+/// One catch-up pass. `mark` is what a read this pass sends itself answers for; the pass returns
+/// the mark of the read it applied, which is older when it applied one made before it began.
 async fn catch_up_once(
     state: &Arc<AppState>,
     mls_group_id: &str,
     user_id: &str,
     prefetched: Option<PrefetchedCatchUp>,
-) -> Result<()> {
+    mark: super::ingest_guard::ReadMark,
+) -> Result<super::ingest_guard::ReadMark> {
     // A read made before the seal is this pass's read when nothing moved since (#2141).
     let current = prefetched.filter(|p| {
         state.catch_up_clock.unchanged_since(p.clock)
@@ -338,13 +347,15 @@ async fn catch_up_once(
     let _pass = state.catch_up_clock.pass();
     let detach_tail = current.is_some();
     // One request lists the bound conversations and their envelopes past each watermark (#875, #987).
-    let resolved = match current {
-        Some(p) => p.response,
-        None => crate::commands::ds_reads::catch_up(state, mls_group_id, true, false).await?,
+    // A read made before the pass (a seal's, or a push fetch's) answers only for what was asked
+    // before it was sent; its own mark says so.
+    let (resolved, read) = match current {
+        Some(p) => (p.response, p.mark),
+        None => crate::commands::ds_reads::catch_up_envelopes(state, mls_group_id, mark).await?,
     };
     if !resolved.authorized {
         // Not a member (any more): nothing to do.
-        return Ok(());
+        return Ok(read);
     }
     let is_dm = resolved.kind == pollis_api::directory::ConversationKind::Dm;
     // The log head the DS read BEFORE it scanned the envelopes (#1041): the
@@ -399,7 +410,8 @@ async fn catch_up_once(
             })
         })
         .collect();
-    // Delivery receipts (#857), batched per conversation; `emit_receipt` re-checks the gates. Best-effort.
+    // Delivery receipts (#857): what each conversation owes, this pass's and any earlier, through
+    // the one receipt drain, which re-checks the gates.
     let delivered: Vec<(String, Vec<String>)> = if is_dm {
         results
             .iter()
@@ -409,6 +421,7 @@ async fn catch_up_once(
         Vec::new()
     };
     let tail_state = Arc::clone(state);
+    let tail_user = user_id.to_string();
     let tail = async move {
         let state = &tail_state;
         let watermarks = futures_util::future::join_all(watermark_bodies.iter().map(|body| async move {
@@ -419,10 +432,7 @@ async fn catch_up_once(
                 );
             }
         }));
-        let receipts = emit_delivered_batches(
-            state,
-            delivered.iter().map(|(c, ids)| (c.as_str(), ids.as_slice())),
-        );
+        let receipts = super::receipts::send_owed(state, &tail_user, &delivered);
         tokio::join!(watermarks, receipts);
     };
     // Everything above is stored; a push fetch posts its notification without waiting for
@@ -433,7 +443,7 @@ async fn catch_up_once(
         crate::notify::scope::defer_or_run(tail).await;
     }
 
-    Ok(())
+    Ok(read)
 }
 
 /// Bucket one catch-up's envelopes per bound conversation, in the order the
@@ -489,43 +499,27 @@ pub(super) fn into_sealing_order(run: &mut [(usize, usize)], arrival: &[Vec<Opti
     run.sort_by_key(|&(ci, ei)| arrival.get(ci).and_then(|a| a.get(ei)).copied().flatten());
 }
 
-/// Emit one delivery receipt per conversation for newly persisted messages (#857). Best-effort.
-async fn emit_delivered_batches<'a>(
-    state: &Arc<AppState>,
-    batches: impl Iterator<Item = (&'a str, &'a [String])>,
-) {
-    for (conversation_id, ids) in batches {
-        if ids.is_empty() {
-            continue;
-        }
-        if let Err(e) = super::receipts::emit_delivered(state, conversation_id, ids).await {
-            crate::diag!("[receipts] delivered emit failed for {conversation_id}: {e}");
-        }
-    }
-}
-
 /// What the committer's sweep ([`sweep_current_epoch`]) persisted, handed back
 /// so the receipts it owes are sent only once the won commit is merged.
 pub(crate) struct SweptEnvelopes {
     is_dm: bool,
+    user_id: String,
     newly_delivered: Vec<(String, Vec<String>)>,
 }
 
 impl SweptEnvelopes {
-    /// Send the delivery receipts for what the sweep persisted. Deferred to
-    /// after the merge because a receipt is itself an MLS send, and encrypting
-    /// merges any staged commit first — before the committer has finalized it.
-    pub(crate) async fn emit_receipts(self, state: &Arc<AppState>) {
+    /// Send the delivery receipts the sweep's messages owe (they are owed already, with the
+    /// rows). The committer still holds the group's MLS lock, and a receipt is sealed under it,
+    /// so the drain runs in its own task and seals once the committer lets go; a drain that
+    /// never runs (the process ends first) leaves them owed for the next one.
+    pub(crate) fn send_receipts(self, state: &Arc<AppState>) {
         if !self.is_dm {
             return;
         }
-        emit_delivered_batches(
-            state,
-            self.newly_delivered
-                .iter()
-                .map(|(cid, ids)| (cid.as_str(), ids.as_slice())),
-        )
-        .await;
+        let task_state = Arc::clone(state);
+        state.spawn_background(async move {
+            super::receipts::send_owed(&task_state, &self.user_id, &self.newly_delivered).await;
+        });
     }
 }
 
@@ -546,6 +540,7 @@ pub(crate) async fn sweep_current_epoch(
     let is_dm = resolved.kind == pollis_api::directory::ConversationKind::Dm;
     let mut swept = SweptEnvelopes {
         is_dm,
+        user_id: user_id.to_string(),
         newly_delivered: Vec::new(),
     };
     if !resolved.authorized {
@@ -1198,8 +1193,12 @@ fn open_and_persist(
                             }
                         }
                         // New inbound: stored for the first time and someone else's. Only a DM
-                        // acknowledges it (#857); any conversation's wake may announce it (#1628).
+                        // acknowledges it (#857), and the receipt is owed in this savepoint, with
+                        // the row; any conversation's wake may announce it (#1628).
                         if inserted > 0 && cred_sender != user_id {
+                            if is_dm {
+                                super::receipts::owe_delivered_on(conn, conversation_id, id);
+                            }
                             return Ingested::Opened(Some(id.clone()));
                         }
                     }

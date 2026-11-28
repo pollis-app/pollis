@@ -244,13 +244,10 @@ pub(crate) async fn drain(state: &Arc<AppState>) -> Result<(Vec<String>, Vec<Str
         let Some(db) = guard.as_ref() else {
             return Ok((Vec::new(), Vec::new()));
         };
-        let mut stmt = db.conn().prepare(
+        super::strings_on(
+            db.conn(),
             "SELECT id FROM vault_outbox WHERE send_state IN ('pending', 'failed') ORDER BY created_at, id",
-        )?;
-        let ids = stmt
-            .query_map([], |r| r.get::<_, String>(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        ids
+        )?
     };
     if ids.is_empty() {
         return Ok((Vec::new(), Vec::new()));

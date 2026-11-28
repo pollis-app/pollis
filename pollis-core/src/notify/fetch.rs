@@ -448,6 +448,8 @@ async fn ingest_once(
     let Some(handle) = handle.filter(|h| !h.is_empty()) else {
         return Ok(None);
     };
+    // Before the fetch goes out: its catch-up answers only for catch-ups asked before it.
+    let mark = state.catch_up_flights.mark();
     let fetched = push_fetch(state, user_id, handle).await?;
     let resolved = match fetched.as_ref() {
         Some(r) => r.conversation_id.clone().zip(r.kind.clone()),
@@ -460,7 +462,7 @@ async fn ingest_once(
         return Ok(None);
     };
     let had_fetch = fetched.is_some();
-    let scope = Scope::new(fetched, tail);
+    let scope = Scope::new(fetched, tail, mark);
     if had_fetch && !scope.has_prefetch() {
         crate::diag!("[notify] a Welcome is pending; reading it fresh under the lock");
     }

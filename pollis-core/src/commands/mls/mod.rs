@@ -63,6 +63,7 @@ pub use key_packages::forge_key_package_for;
 pub use welcomes::{
     apply_welcome, poll_mls_welcomes, poll_mls_welcomes_deferring, poll_mls_welcomes_inner, reset_welcome_delivery,
 };
+pub(crate) use welcomes::drain_owed_welcomes;
 
 pub use group_state::{
     envelope_lineage, external_join_group, forget_local_mls_group, has_local_group, init_mls_group,

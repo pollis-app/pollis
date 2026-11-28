@@ -146,6 +146,17 @@ impl DsFault {
 pub(crate) static NEXT_DS_FAULT: std::sync::Mutex<Option<DsFault>> =
     std::sync::Mutex::new(None);
 
+/// The next client parked at an armed rendezvous point, or a panic naming `what` after 30 s.
+pub(crate) async fn parked_at(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<pollis_core::commands::mls::rendezvous::Release>,
+    what: &str,
+) -> pollis_core::commands::mls::rendezvous::Release {
+    tokio::time::timeout(std::time::Duration::from_secs(30), rx.recv())
+        .await
+        .unwrap_or_else(|_| panic!("{what}"))
+        .expect("rendezvous closed")
+}
+
 /// One-shot: consumed the first time it applies.
 pub(crate) fn arm_ds_fault(fault: DsFault) {
     *NEXT_DS_FAULT.lock().expect("NEXT_DS_FAULT poisoned") = Some(fault);
@@ -1839,6 +1850,24 @@ impl TestClient {
 }
 
 impl TestClient {
+    /// `(message_id, reader_id, kind)` of every receipt this client holds in `conversation`,
+    /// in that order.
+    pub(crate) async fn receipts(&self, conversation: &str) -> Vec<(String, String, String)> {
+        let guard = self.state.local_db.lock().await;
+        let conn = guard.as_ref().expect("db").conn();
+        let mut st = conn
+            .prepare(
+                "SELECT r.message_id, r.reader_id, r.kind FROM message_receipt r \
+                 JOIN message m ON m.id = r.message_id WHERE m.conversation_id = ?1 \
+                 ORDER BY 1, 2, 3",
+            )
+            .unwrap();
+        st.query_map([conversation], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
     /// `get_dm_messages`, which polls welcomes and processes commits first.
     pub(crate) async fn fetch_dm_messages(&self, dm_channel_id: &str) -> Vec<serde_json::Value> {
         let page: serde_json::Value = self

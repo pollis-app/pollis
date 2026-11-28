@@ -739,6 +739,14 @@ Android FCM handler both call one plain C function in `pollis-core`
   `ds_reads::catch_up`, `mls::ds_reads::fetch_welcomes` and `ds_reads::account_keys` answer from
   it instead of the network (the catch-up for the handle's conversation or its MLS group,
   envelopes handed out once, then the network; never with a roster or membership version).
+  **The envelopes go only to a catch-up pass, with their mark.** `ds_reads::catch_up_envelopes`
+  is the one reader that serves them (`scope::envelopes`), together with the `ReadMark` the fetch
+  took before it went out (`ingest_once`). The pass that applies them covers only the catch-up
+  requests made before that read, so a realtime wake that queued behind the same running pass
+  after the push was read still runs its own pass and fetches what arrived since; before, the
+  push's pass covered it by its start time, and that message waited for the next push or
+  foreground (`rich_push::a_wake_after_the_push_read_is_not_covered_by_the_push_pass`). Any
+  other envelope read (the committer's pre-merge sweep) goes to the network.
   **A pending Welcome disables the prefetch:** it was read before the cross-process lock, and
   applying a Welcome another drain already applied would replace a group with an older one, so
   that case keeps the separate requests. A DS without the route (404, any non-network error)
@@ -751,7 +759,10 @@ Android FCM handler both call one plain C function in `pollis-core`
   `…an_older_delivery_service_still_previews`, `…a_pending_welcome_is_drained_fresh_…`.
 - **The tail waits (#1804).** A notification needs the message stored, not the watermark
   advanced or the delivered receipt sent (which costs its own catch-up, an MLS seal, an envelope
-  post and a LiveKit hint). Inside a push fetch, `catch_up_once` hands both to
+  post and a LiveKit hint). A headless fetch is locked, so it cannot sign a receipt at all: the
+  receipt stays owed in `receipt_owed`, written with the message, and the app's next pass or
+  outbox drain sends it (`rich_push::a_message_a_headless_fetch_stored_is_acknowledged_by_the_apps_next_pass`).
+  The in-app fetch is unlocked and sends it from its deferred tail. Inside a push fetch, `catch_up_once` hands both to
   `scope::defer_or_run`, which spawns them on the core runtime into the fetch's `TailSet`;
   everywhere else they run inline as before. The in-app fetch registers them for
   `pollis_notify_settle`; the headless fetch keeps `state.lock` and the open database until they

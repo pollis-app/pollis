@@ -4,11 +4,14 @@
 //! **Prefetch.** `POST /v1/push/fetch` answers the handle resolve, this device's
 //! Welcome read, the conversation's catch-up and a DM's peer account keys at once.
 //! The fetch then runs the app's own ingest unchanged inside [`run`]; the readers
-//! that ingest calls ([`catch_up`], [`welcomes`], [`account_keys`]) answer from the
-//! prefetch instead of the network. Envelopes are served once (a second pass goes
-//! to the network, as before), and the prefetch is installed only when no Welcome is
-//! pending: applying a Welcome read before the cross-process lock was taken could
-//! replay one another drain already applied, so that rare case keeps the old path.
+//! that ingest calls ([`catch_up`], [`envelopes`], [`welcomes`], [`account_keys`])
+//! answer from the prefetch instead of the network. Envelopes are served once, to a
+//! catch-up pass only, together with the [`ReadMark`] taken before the fetch went out:
+//! the pass covers only the catch-up requests made before that read, so a wake that
+//! asked after it gets a pass of its own. A second pass goes to the network, as before.
+//! The prefetch is installed only when no Welcome is pending: applying a Welcome read
+//! before the cross-process lock was taken could replay one another drain already
+//! applied, so that rare case keeps the old path.
 //!
 //! **Tail.** A notification needs the message stored, not the watermark advanced
 //! or the delivered receipt sent. Inside a scope that allows it, the ingest hands
@@ -24,6 +27,8 @@ use pollis_api::account_reads::AccountKeyRow;
 use pollis_api::devices::PushFetchResponse;
 use pollis_api::directory::CatchUpResponse;
 use pollis_api::reads::FetchWelcomesResponse;
+
+use crate::commands::messages::ingest_guard::ReadMark;
 
 tokio::task_local! {
     static SCOPE: Arc<Scope>;
@@ -71,11 +76,18 @@ struct Prefetch {
     welcomes: Option<FetchWelcomesResponse>,
     account_keys: Vec<AccountKeyRow>,
     account_keys_for: Vec<String>,
+    /// The catch-up requests the fetch's read answers for (taken before it was sent).
+    mark: ReadMark,
 }
 
 impl Scope {
-    /// A scope with a prefetch, or `None` for the prefetch when it may not be used.
-    pub(crate) fn new(resp: Option<PushFetchResponse>, tail: Option<Arc<TailSet>>) -> Arc<Self> {
+    /// A scope with a prefetch, or `None` for the prefetch when it may not be used. `mark` is
+    /// the flight table's [`ReadMark`] taken before the push fetch was sent.
+    pub(crate) fn new(
+        resp: Option<PushFetchResponse>,
+        tail: Option<Arc<TailSet>>,
+        mark: ReadMark,
+    ) -> Arc<Self> {
         let prefetch = resp.and_then(|r| {
             let conversation_id = r.conversation_id?;
             // A pending Welcome is applied from a fresh read under the lock (see the module doc).
@@ -89,6 +101,7 @@ impl Scope {
                 welcomes: r.welcomes,
                 account_keys: r.account_keys,
                 account_keys_for: r.account_keys_for,
+                mark,
             })
         });
         Arc::new(Self { prefetch, tail })
@@ -108,48 +121,58 @@ fn current() -> Option<Arc<Scope>> {
     SCOPE.try_with(Arc::clone).ok()
 }
 
-/// The prefetched catch-up for `conversation_id`, as `/v1/conversations/catch-up`
-/// would answer these flags, or `None` to ask the network.
+/// The prefetched catch-up metadata for `conversation_id`, as `/v1/conversations/catch-up`
+/// would answer these flags without envelopes, or `None` to ask the network. Envelopes are
+/// served only by [`envelopes`].
 pub(crate) fn catch_up(
     conversation_id: &str,
     want_envelopes: bool,
     want_dm: bool,
 ) -> Option<CatchUpResponse> {
+    if want_envelopes {
+        return None;
+    }
     let scope = current()?;
     let p = scope.prefetch.as_ref()?;
     let resp = p.catch_up.as_ref()?;
-    serve_catch_up(p, resp, conversation_id, want_envelopes, want_dm)
-}
-
-fn serve_catch_up(
-    p: &Prefetch,
-    resp: &CatchUpResponse,
-    conversation_id: &str,
-    want_envelopes: bool,
-    want_dm: bool,
-) -> Option<CatchUpResponse> {
-    if conversation_id != p.conversation_id && conversation_id != resp.mls_group_id {
+    if !p.answers(resp, conversation_id) {
         return None;
     }
     if want_dm && resp.kind == pollis_api::directory::ConversationKind::Dm && resp.dm.is_none() && resp.authorized {
         return None;
     }
-    if want_envelopes {
-        // `head` is present exactly when envelopes were read.
-        if resp.head.is_none() && resp.authorized {
-            return None;
-        }
-        let mut taken = p.envelopes_taken.lock().unwrap_or_else(|e| e.into_inner());
-        if *taken {
-            return None;
-        }
-        *taken = true;
-        return Some(resp.clone());
-    }
     let mut out = resp.clone();
     out.envelopes = Vec::new();
     out.head = None;
     Some(out)
+}
+
+/// The prefetched envelopes for a catch-up pass of `mls_group_id`, once, with the
+/// [`ReadMark`] of the read that fetched them; `None` to ask the network.
+pub(crate) fn envelopes(mls_group_id: &str) -> Option<(CatchUpResponse, ReadMark)> {
+    let scope = current()?;
+    let p = scope.prefetch.as_ref()?;
+    let resp = p.catch_up.as_ref()?;
+    if !p.answers(resp, mls_group_id) {
+        return None;
+    }
+    // `head` is present exactly when envelopes were read.
+    if resp.head.is_none() && resp.authorized {
+        return None;
+    }
+    let mut taken = p.envelopes_taken.lock().unwrap_or_else(|e| e.into_inner());
+    if *taken {
+        return None;
+    }
+    *taken = true;
+    Some((resp.clone(), p.mark))
+}
+
+impl Prefetch {
+    /// Whether the prefetched catch-up is the one a read for `conversation_id` asks for.
+    fn answers(&self, resp: &CatchUpResponse, conversation_id: &str) -> bool {
+        conversation_id == self.conversation_id || conversation_id == resp.mls_group_id
+    }
 }
 
 /// The prefetched Welcome read (always empty: see [`Scope::new`]), or `None`.
@@ -294,18 +317,24 @@ mod tests {
         }
     }
 
+    fn mark() -> ReadMark {
+        crate::commands::messages::ingest_guard::FlightTable::default().mark()
+    }
+
     #[tokio::test]
     async fn envelopes_are_served_once_and_metadata_without_them() {
-        let scope = Scope::new(Some(response(false)), None);
+        let scope = Scope::new(Some(response(false)), None, mark());
         run(scope, async {
             // The group lookup by channel id: metadata, no envelopes.
             let meta = catch_up("chan-1", false, false).expect("served");
             assert!(meta.envelopes.is_empty());
             assert!(meta.head.is_none());
-            // The catch-up by MLS group id: the envelopes, once.
-            let first = catch_up("group-1", true, false).expect("served");
+            // Envelopes go only to a catch-up pass, with the mark of the fetch's read.
+            assert!(catch_up("group-1", true, false).is_none(), "never without their mark");
+            let (first, read) = envelopes("group-1").expect("served");
             assert_eq!(first.envelopes.len(), 1);
-            assert!(catch_up("group-1", true, false).is_none(), "a second pass reads the network");
+            assert_eq!(read, mark());
+            assert!(envelopes("group-1").is_none(), "a second pass reads the network");
             // Another conversation is never answered from this prefetch.
             assert!(catch_up("other", false, false).is_none());
             // Welcomes and keys.
@@ -326,10 +355,11 @@ mod tests {
             welcome: "d2VsY29tZQ==".into(),
             conversation_id: None,
         });
-        let scope = Scope::new(Some(r), None);
+        let scope = Scope::new(Some(r), None, mark());
         assert!(!scope.has_prefetch());
         run(scope, async {
-            assert!(catch_up("chan-1", true, false).is_none());
+            assert!(catch_up("chan-1", false, false).is_none());
+            assert!(envelopes("group-1").is_none());
             assert!(welcomes().is_none());
             assert!(account_keys(&["bob".into()]).is_none());
         })
@@ -339,6 +369,7 @@ mod tests {
     #[tokio::test]
     async fn nothing_is_served_outside_a_scope() {
         assert!(catch_up("chan-1", false, false).is_none());
+        assert!(envelopes("group-1").is_none());
         assert!(welcomes().is_none());
     }
 
@@ -346,7 +377,7 @@ mod tests {
     async fn a_dm_catch_up_without_members_is_not_served_for_want_dm() {
         let mut r = response(true);
         r.catch_up.as_mut().unwrap().kind = ConversationKind::Dm;
-        let scope = Scope::new(Some(r), None);
+        let scope = Scope::new(Some(r), None, mark());
         run(scope, async {
             assert!(catch_up("chan-1", false, true).is_none());
         })
@@ -362,7 +393,7 @@ mod tests {
         let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = Arc::clone(&done);
         let set = Arc::new(TailSet::default());
-        let scope = Scope::new(None, Some(Arc::clone(&set)));
+        let scope = Scope::new(None, Some(Arc::clone(&set)), mark());
         run(scope, async move {
             defer_or_run(async move {
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -395,7 +426,7 @@ mod tests {
         let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = Arc::clone(&done);
         let set = Arc::new(TailSet::default());
-        run(Scope::new(None, Some(Arc::clone(&set))), async move {
+        run(Scope::new(None, Some(Arc::clone(&set)), mark()), async move {
             defer_or_run(async move {
                 tokio::time::sleep(TAIL_BUDGET * 4).await;
                 flag.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -418,7 +449,7 @@ mod tests {
         let tracked = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (s, t) = (Arc::clone(&sent), Arc::clone(&tracked));
         let set = Arc::new(TailSet::default());
-        run(Scope::new(None, Some(Arc::clone(&set))), async move {
+        run(Scope::new(None, Some(Arc::clone(&set)), mark()), async move {
             defer_or_run(async move {
                 let kept = spawn_in_tail(async move {
                     tokio::time::sleep(Duration::from_millis(100)).await;

@@ -96,7 +96,8 @@ from the baseline:
 1. Every `merge_pending_commit` call site: is it inside `publish_staged_commit` /
    `apply_one_commit`, or under the per-conversation `mls_group_lock` after an
    ingesting catch-up? Any site reachable without the lock (the baseline found
-   `try_mls_encrypt` via `receipts::emit_receipt`) is a drift point.
+   `try_mls_encrypt` via the receipt emitter, which now seals under the lock
+   through `receipts::drain_owed`) is a drift point.
 2. The commit add-metadata (`added_user_id`, `added_device_ids`): is the receiver's
    cert verification driven by the full `(user, device)` add set, or by one user id?
 3. Leaver eviction: after `leave_group` / `leave_dm_channel`, who commits the

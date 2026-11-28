@@ -104,17 +104,28 @@ pub(super) fn seal_under_lock(
     })
 }
 
-/// Seal for a caller that deliberately holds NO MLS lock, where not sealing is
-/// an acceptable outcome.
-///
-/// `Ok(None)` covers no group and a staged commit. Only for `emit_receipt`, where locking would deadlock catch-up.
-pub(super) fn try_seal_unlocked(
-    conn: &rusqlite::Connection,
-    mls_group_id: &str,
+/// The envelope body of a control frame (a redaction, a receipt): sealed sender (#607), no
+/// reply, and no push, since it wakes nobody (#987).
+pub(super) fn control_envelope(
+    envelope_id: &str,
     conversation_id: &str,
-    plaintext: &[u8],
-) -> Result<Option<Sealed>> {
-    try_seal_inner(conn, mls_group_id, conversation_id, plaintext)
+    sealed: &Sealed,
+    delete_token_hash: Option<String>,
+) -> pollis_api::messages::SendMessageBody {
+    pollis_api::messages::SendMessageBody {
+        id: envelope_id.to_string(),
+        conversation_id: conversation_id.to_string(),
+        sender_id: Some(super::send::SEALED_SENDER_SENTINEL.to_string()),
+        ciphertext: sealed.wire(),
+        reply_to_id: None,
+        sent_at: sealed.sent_at.clone(),
+        sealed: 1,
+        generation: Some(sealed.generation),
+        epoch: Some(sealed.epoch),
+        push_to: None,
+        push_mentions: None,
+        delete_token_hash,
+    }
 }
 
 /// How many times a post re-seals before giving up.
