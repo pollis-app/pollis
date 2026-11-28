@@ -108,7 +108,8 @@ test("the chat screen hides its list only until then", () => {
     "utf8",
   );
   assert.match(screen, /useRevealWithReactions\(/);
-  assert.match(screen, /opacity: listRevealed \? 1 : 0/);
+  assert.match(screen, /style=\{listRevealed \? LIST_SHOWN : LIST_HIDDEN\}/);
+  assert.match(screen, /const LIST_HIDDEN = \{ flex: 1, opacity: 0 \}/);
 });
 
 test("the hook makes no per-message reads", () => {

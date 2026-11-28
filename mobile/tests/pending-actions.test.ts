@@ -90,7 +90,7 @@ test("edit and delete keep their change over refetches and never restore a whole
     assert.ok(body.includes("settleLocalChange("), `${name} settles it`);
     assert.ok(!/setQueryData\(ctx\.key, ctx\.previous\)/.test(body), `${name} restores no page snapshot`);
   }
-  assert.match(hook, /applyLocalChanges\(\(page\.messages \?\? \[\]\)\.map\(transform\), localChanges\)/);
+  assert.match(hook, /applyLocalChanges\(\(page\.messages \?\? \[\]\)\.map\(transformMessage\), localChanges\)/);
 });
 
 test("a stub without the core's id offers no actions", () => {

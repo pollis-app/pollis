@@ -464,6 +464,35 @@ Concretely, in the message log:
   the cache clears on `languageChanged` and on window focus (a formatter keeps the time
   zone it was built in).
 
+#### Mobile chat list (#2141, #2168)
+
+The mobile conversation (`mobile/app/chat/[id].tsx`) holds the same rules with its own pieces:
+
+- **Rows** are `MessageRowItem`, `memo` with React's default shallow compare, never a custom
+  comparator. Its props come from `components/chat/messageRowProps.ts`, all per row: the
+  message, its own reactions entry and receipt, `highlighted` as a boolean, the shared `ctx`
+  and the screen's once-built `handlers` (they read live state through a ref). Retry and
+  Discard are derived from the message on every render, so a send that turns failed shows them.
+- **Row objects keep identity** across re-reads: the conversation's infinite query uses
+  `structuralSharing: shareMessagePagesById` (`hooks/queries/messageRows.ts`), which matches
+  rows by id across every page (a page is cut by cursor from the newest, so an arrival slides
+  every row) and keeps a row's old object only when `replaceEqualDeep` finds it deep-equal.
+  A received attachment reference carries `uploaded_at: 0`, not a clock value per read.
+  `mergeReactions` keeps an entry's old array when it reads back equal. Nothing may write into
+  a cached `Message` in place: identity reuse would make the change invisible.
+- **The list** gets hoisted props (`chatItemKey`, `LIST_SHOWN`/`LIST_HIDDEN`, `LIST_CONTENT`, a
+  memoised footer) and `strictMode`, so a keystroke's screen render skips the FlatList and its
+  cells. Items come from `lib/chatItems.ts`, one item object per (message, grouping).
+- **Dates** format through one cached `Intl.DateTimeFormat` per (locale, options)
+  (`components/chat/dates.ts`), cleared on a language change and on every return to the
+  foreground.
+
+Guards: `mobile/tests/chat-row-identity.test.ts` counts the rows React renders on the real
+pipeline (a keystroke 0, an arrival into a paged conversation at most 2, a send turning failed
+1, a reaction re-read 1) and pins every send-state, edit, delete and decryption change to a new
+object; `mobile/tests/chat-render-cost.test.ts` pins the handlers; the device tier is
+`.maestro/flows/chat-perf.yaml`.
+
 ### The pre-app backdrop holds still (#2169)
 
 `DotMatrix`, behind every pre-app screen (`BackdropScreen`: lock, sign-in, PIN,

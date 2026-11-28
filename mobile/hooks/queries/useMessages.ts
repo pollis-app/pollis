@@ -37,15 +37,11 @@ import {
   type LocalChange,
   mapOutboxRows,
   settleSend,
-  unsentFlags,
   withoutOutboxRows,
   type SendState,
 } from "./pendingMessages";
-import {
-  linkPreviewFromWire,
-  optimisticLinkPreview,
-  parseContent,
-} from "../../lib/messageContent";
+import { optimisticLinkPreview } from "../../lib/messageContent";
+import { flattenRows, shareMessagePagesById, transformMessage } from "./messageRows";
 import { createSingleFlight } from "../../lib/singleFlight";
 import { stripFormatting } from "../../../design/messageFormat.ts";
 
@@ -136,49 +132,8 @@ export interface DecodedPage {
 
 export type MessagesData = InfiniteData<DecodedPage, MessageCursor | null>;
 
-function transform(raw: RawChannelMessage): Message {
-  const parsed = parseContent(raw.content, { conversationId: raw.conversation_id });
-  return {
-    id: raw.id,
-    conversation_id: raw.conversation_id,
-    sender_id: raw.sender_id,
-    sender_username: raw.sender_username,
-    sender_display_name: raw.sender_display_name ?? null,
-    content: parsed.text,
-    attachments: parsed.attachments,
-    link_preview: linkPreviewFromWire(raw.link_preview, { conversationId: raw.conversation_id }),
-    reply_to_id: raw.reply_to_id ?? null,
-    thread_id: raw.thread_id ?? null,
-    created_at: new Date(raw.sent_at).getTime(),
-    edited_at: raw.edited_at ? new Date(raw.edited_at).getTime() : undefined,
-    deleted_at: raw.deleted_at ? new Date(raw.deleted_at).getTime() : undefined,
-    undecryptable: raw.undecryptable === true ? true : undefined,
-    edit_unsent:
-      raw.edit_state === "failed" || raw.edit_state === "rejected" ? true : undefined,
-    ...unsentFlags(raw.id, raw.send_state),
-  };
-}
-
 /** Flatten newest-first pages, dropping duplicates where refetched page boundaries overlap. */
-export function flattenPages(
-  data: { pages: DecodedPage[] } | undefined,
-): Message[] {
-  if (!data) {
-    return [];
-  }
-  const seen = new Set<string>();
-  const out: Message[] = [];
-  for (const page of data.pages) {
-    for (const m of page.messages) {
-      if (seen.has(m.id)) {
-        continue;
-      }
-      seen.add(m.id);
-      out.push(m);
-    }
-  }
-  return out;
-}
+export const flattenPages = flattenRows;
 
 export const messageQueryKeys = {
   all: ["messages"] as const,
@@ -223,7 +178,7 @@ async function readMessagePage(
   }
   const page = await invoke<MessagePage>(cmd, args);
   // Edits and deletes still in flight stay drawn over what the store holds (#2141).
-  const messages = applyLocalChanges((page.messages ?? []).map(transform), localChanges);
+  const messages = applyLocalChanges((page.messages ?? []).map(transformMessage), localChanges);
   // A refetch of the newest page while a send is in flight must not drop
   // its optimistic stub, which is never in the store (pendingMessages.ts).
   const newest = pageParam
@@ -262,6 +217,8 @@ export function useMessages(
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: !!(conversationId && kind && currentUser),
     staleTime: MESSAGES_STALE_MS,
+    // By message id across every page, never by index (#2168): an arrival slides each page.
+    structuralSharing: shareMessagePagesById,
   });
 }
 
@@ -285,6 +242,7 @@ export function usePrefetchConversation() {
           readMessagePage(queryClient, conversationId, kind, PAGE_LIMIT, pageParam),
         getNextPageParam: (lastPage: DecodedPage) => lastPage.nextCursor,
         staleTime: MESSAGES_STALE_MS,
+        structuralSharing: shareMessagePagesById,
       });
     },
     [currentUser, queryClient],
@@ -465,7 +423,7 @@ export function useSendMessage(
         senderUsername: currentUser.username ?? null,
         messageId,
       });
-      return transform(raw);
+      return transformMessage(raw);
     },
     onMutate: async (vars) => {
       if (!conversationId || !kind || !currentUser) {
@@ -619,7 +577,7 @@ export function useRetryMessage(
     // A retry feels like the send it repeats (#1286).
     meta: { haptic: { mutate: "send" } },
     mutationFn: async (outboxId: string) =>
-      transform(await invoke<RawChannelMessage>("retry_message", { messageId: outboxId })),
+      transformMessage(await invoke<RawChannelMessage>("retry_message", { messageId: outboxId })),
     onMutate: (outboxId) => {
       if (!conversationId || !kind) {
         return;
@@ -728,7 +686,7 @@ export function useThreadMessages(threadId: string | null) {
         })) ?? [];
       // Same race as the conversation pages: keep an in-flight reply's stub.
       return carryStubs(
-        raw.map(transform),
+        raw.map(transformMessage),
         queryClient.getQueryData<Message[]>(messageQueryKeys.thread(threadId)),
         "oldestFirst",
       );
@@ -961,7 +919,7 @@ export function useLastMessages(conversationIds: string[]) {
       });
       const out: LastMessageMap = {};
       for (const row of rows ?? []) {
-        out[row.conversation_id] = transform(row);
+        out[row.conversation_id] = transformMessage(row);
       }
       return out;
     },
