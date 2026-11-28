@@ -9,7 +9,7 @@
 import type { EmojiAnnotationRow } from "./annotations/index";
 
 /** How long one table read may take before the picker gives up on it and shows English. */
-export const EMOJI_TABLE_READ_TIMEOUT_MS = 5000;
+const EMOJI_TABLE_READ_TIMEOUT_MS = 5000;
 
 export type EmojiTableRead = (moduleId: number) => Promise<string>;
 
